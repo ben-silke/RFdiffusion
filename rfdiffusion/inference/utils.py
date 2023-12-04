@@ -73,7 +73,7 @@ def get_next_frames(xt, px0, t, diffuser, so3_type, diffusion_mask, noise_scale=
             return_perturb=True,
         )
     else:
-        assert False, "so3 diffusion type %s not implemented" % so3_type
+        assert False, f"so3 diffusion type {so3_type} not implemented"
 
     all_rot_transitions = all_rot_transitions[:, None, :, :]
 
@@ -167,7 +167,7 @@ def get_next_ca(
     sampled_crds = torch.normal(mu, torch.sqrt(sigma * noise_scale))
     delta = sampled_crds - xt[:, 1, :]  # check sign of this is correct
 
-    if not diffusion_mask is None:
+    if diffusion_mask is not None:
         # Don't move motif
         delta[diffusion_mask, ...] = 0
 
@@ -375,7 +375,7 @@ class Denoise:
             Ca_grads (torch.tensor): [L,3] The gradient at each Ca atom
         """
 
-        if self.potential_manager == None or self.potential_manager.is_empty():
+        if self.potential_manager is None or self.potential_manager.is_empty():
             return torch.zeros(xyz.shape[0], 3)
 
         use_Cb = False
@@ -383,7 +383,7 @@ class Denoise:
         # seq.requires_grad = True
         xyz.requires_grad = True
 
-        if not xyz.grad is None:
+        if xyz.grad is not None:
             xyz.grad.zero_()
 
         current_potential = self.potential_manager.compute_all_potentials(xyz)
@@ -393,7 +393,7 @@ class Denoise:
         # Need access to calculated Cb coordinates to be able to get Cb grads though
         Ca_grads = xyz.grad[:, 1, :]
 
-        if not diffusion_mask == None:
+        if diffusion_mask is not None:
             Ca_grads[diffusion_mask, :] = 0
 
         # check for NaN's
@@ -437,8 +437,8 @@ class Denoise:
 
         get_allatom = ComputeAllAtomCoords().to(device=xt.device)
         L, n_atom = xt.shape[:2]
-        assert (xt.shape[1] == 14) or (xt.shape[1] == 27)
-        assert (px0.shape[1] == 14) or (px0.shape[1] == 27)
+        assert xt.shape[1] in [14, 27]
+        assert px0.shape[1] in [14, 27]
 
         ###############################
         ### Align pX0 onto Xt motif ###
@@ -504,15 +504,14 @@ class Denoise:
 def sampler_selector(conf: DictConfig):
     if conf.scaffoldguided.scaffoldguided:
         sampler = model_runners.ScaffoldedSampler(conf)
+    elif conf.inference.model_runner == "default":
+        sampler = model_runners.Sampler(conf)
+    elif conf.inference.model_runner == "SelfConditioning":
+        sampler = model_runners.SelfConditioning(conf)
+    elif conf.inference.model_runner == "ScaffoldedSampler":
+        sampler = model_runners.ScaffoldedSampler(conf)
     else:
-        if conf.inference.model_runner == "default":
-            sampler = model_runners.Sampler(conf)
-        elif conf.inference.model_runner == "SelfConditioning":
-            sampler = model_runners.SelfConditioning(conf)
-        elif conf.inference.model_runner == "ScaffoldedSampler":
-            sampler = model_runners.ScaffoldedSampler(conf)
-        else:
-            raise ValueError(f"Unrecognized sampler {conf.model_runner}")
+        raise ValueError(f"Unrecognized sampler {conf.model_runner}")
     return sampler
 
 
@@ -546,7 +545,7 @@ def parse_pdb_lines(lines, parse_hetatom=False, ignore_het_h=True):
         chain, resNo, atom, aa = (
             l[21:22],
             int(l[22:26]),
-            " " + l[12:16].strip().ljust(3),
+            f" {l[12:16].strip().ljust(3)}",
             l[17:20],
         )
         if (chain,resNo) in pdb_idx:
@@ -650,13 +649,14 @@ def get_idx0_hotspots(mappings, ppi_conf, binderlen):
     if binderlen > 0:
         if ppi_conf.hotspot_res is not None:
             assert all(
-                [i[0].isalpha() for i in ppi_conf.hotspot_res]
+                i[0].isalpha() for i in ppi_conf.hotspot_res
             ), "Hotspot residues need to be provided in pdb-indexed form. E.g. A100,A103"
             hotspots = [(i[0], int(i[1:])) for i in ppi_conf.hotspot_res]
-            hotspot_idx = []
-            for i, res in enumerate(mappings["receptor_con_ref_pdb_idx"]):
-                if res in hotspots:
-                    hotspot_idx.append(mappings["receptor_con_hal_idx0"][i])
+            hotspot_idx = [
+                mappings["receptor_con_hal_idx0"][i]
+                for i, res in enumerate(mappings["receptor_con_ref_pdb_idx"])
+                if res in hotspots
+            ]
     return hotspot_idx
 
 
@@ -689,27 +689,25 @@ class BlockAdjacency:
              conf.inference.num_designs for sanity checking
         """
        
-        self.conf=conf 
+        self.conf=conf
         # either list or path to .txt file with list of scaffolds
-        if self.conf.scaffoldguided.scaffold_list is not None:
-            if type(self.conf.scaffoldguided.scaffold_list) == list:
-                self.scaffold_list = scaffold_list
-            elif self.conf.scaffoldguided.scaffold_list[-4:] == ".txt":
-                # txt file with list of ids
-                list_from_file = []
-                with open(self.conf.scaffoldguided.scaffold_list, "r") as f:
-                    for line in f:
-                        list_from_file.append(line.strip())
-                self.scaffold_list = list_from_file
-            else:
-                raise NotImplementedError
-        else:
+        if self.conf.scaffoldguided.scaffold_list is None:
             self.scaffold_list = [
                 os.path.split(i)[1][:-6]
                 for i in glob.glob(f"{self.conf.scaffoldguided.scaffold_dir}/*_ss.pt")
             ]
             self.scaffold_list.sort()
 
+        elif type(self.conf.scaffoldguided.scaffold_list) == list:
+            self.scaffold_list = scaffold_list
+        elif self.conf.scaffoldguided.scaffold_list[-4:] == ".txt":
+            # txt file with list of ids
+            list_from_file = []
+            with open(self.conf.scaffoldguided.scaffold_list, "r") as f:
+                list_from_file.extend(line.strip() for line in f)
+            self.scaffold_list = list_from_file
+        else:
+            raise NotImplementedError
         # path to directory with scaffolds, ss files and block_adjacency files
         self.scaffold_dir = self.conf.scaffoldguided.scaffold_dir
 
@@ -791,7 +789,7 @@ class BlockAdjacency:
                 begin = 0
                 continue
 
-            if not mask[i] == mask[i - 1]:
+            if mask[i] != mask[i - 1]:
                 end = i
                 if mask[i - 1].item() is True:
                     segments.append(("loop", end - begin))
@@ -800,7 +798,7 @@ class BlockAdjacency:
                 begin = i
 
         # Ending edge case: last segment is length one
-        if not end == mask.shape[0]:
+        if end != mask.shape[0]:
             if mask[i].item() is True:
                 segments.append(("loop", mask.shape[0] - begin))
             else:
@@ -926,15 +924,9 @@ class Target:
     def __init__(self, conf: DictConfig, hotspots=None):
         self.pdb = parse_pdb(conf.target_path)
 
-        if hotspots is not None:
-            self.hotspots = hotspots
-        else:
-            self.hotspots = []
+        self.hotspots = hotspots if hotspots is not None else []
         self.pdb["hotspots"] = np.array(
-            [
-                True if f"{i[0]}{i[1]}" in self.hotspots else False
-                for i in self.pdb["pdb_idx"]
-            ]
+            [f"{i[0]}{i[1]}" in self.hotspots for i in self.pdb["pdb_idx"]]
         )
 
         if conf.contig_crop:
@@ -983,9 +975,7 @@ class Target:
             self.pdb["idx"][start:] += residue_offset
         # flatten list
         contig_list = [i for j in contig_list for i in j]
-        mask = np.array(
-            [True if i in contig_list else False for i in self.pdb["pdb_idx"]]
-        )
+        mask = np.array([i in contig_list for i in self.pdb["pdb_idx"]])
 
         # sanity check
         assert np.sum(self.pdb["hotspots"]) == np.sum(

@@ -46,9 +46,7 @@ class MaskedTokenNetwork(nn.Module):
 
     def forward(self, x):
         B, N, L = x.shape[:3]
-        logits = self.proj(x).permute(0,3,1,2).reshape(B, -1, N*L)
-
-        return logits
+        return self.proj(x).permute(0,3,1,2).reshape(B, -1, N*L)
 
 class LDDTNetwork(nn.Module):
     def __init__(self, n_feat, n_bin_lddt=50):

@@ -99,7 +99,7 @@ class EuclideanDiffuser:
         sampled_crds = torch.normal(mean, torch.sqrt(var))
         delta = sampled_crds - ca_xyz
 
-        if not diffusion_mask is None:
+        if diffusion_mask is not None:
             delta[diffusion_mask, ...] = 0
 
         out_crds = x + delta[:, None, :]
@@ -269,7 +269,7 @@ class IGSO3:
         Args:
             t: torch tensor with time between 0 and 1
         """
-        if not type(t) == torch.Tensor:
+        if type(t) != torch.Tensor:
             t = torch.tensor(t)
         if torch.any(t < 0) or torch.any(t > 1):
             raise ValueError(f"Invalid t={t}")
@@ -350,12 +350,11 @@ class IGSO3:
             score_norm with same shape as omega
         """
         sigma_idx = self.t_to_idx(t)
-        score_norm_t = np.interp(
+        return np.interp(
             omega,
             self.igso3_vals["discrete_omega"],
             self.igso3_vals["score_norm"][sigma_idx],
         )
-        return score_norm_t
 
     def score_vec(self, ts, vec):
         """score_vec computes the score of the IGSO(3) density as a rotation
@@ -532,9 +531,7 @@ class IGSO3:
         if return_perturb:
             return Perturb
 
-        Interp_rot = torch.einsum("...ij,...jk->...ik", Perturb, R_t)
-
-        return Interp_rot
+        return torch.einsum("...ij,...jk->...ik", Perturb, R_t)
 
 
 class Diffuser:

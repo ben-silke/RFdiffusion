@@ -60,7 +60,7 @@ def create_custom_forward(module, **kwargs):
     return custom_forward
 
 def get_clones(module, N):
-    return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
 class Dropout(nn.Module):
     # Dropout entire row or column
@@ -74,7 +74,7 @@ class Dropout(nn.Module):
         if not self.training: # no drophead during evaluation mode
             return x
         shape = list(x.shape)
-        if not self.broadcast_dim == None:
+        if self.broadcast_dim is not None:
             shape[self.broadcast_dim] = 1
         mask = self.sampler.sample(shape).to(x.device).view(shape)
 
@@ -88,8 +88,7 @@ def rbf(D):
     D_mu = D_mu[None,:]
     D_sigma = (D_max - D_min) / D_count
     D_expand = torch.unsqueeze(D, -1)
-    RBF = torch.exp(-((D_expand - D_mu) / D_sigma)**2)
-    return RBF
+    return torch.exp(-((D_expand - D_mu) / D_sigma)**2)
 
 def get_seqsep(idx):
     '''
@@ -258,20 +257,20 @@ class ComputeAllAtomCoords(nn.Module):
         CBr = (basexyzs[:,:,4,:3])
         CBrotaxis1 = (CBr-CAr).cross(NCr-CAr)
         CBrotaxis1 /= torch.linalg.norm(CBrotaxis1, dim=-1, keepdim=True)+1e-8
-        
+
         # CB twist
         NCp = basexyzs[:,:,2,:3] - basexyzs[:,:,0,:3]
         NCpp = NCp - torch.sum(NCp*NCr, dim=-1, keepdim=True)/ torch.sum(NCr*NCr, dim=-1, keepdim=True) * NCr
         CBrotaxis2 = (CBr-CAr).cross(NCpp)
         CBrotaxis2 /= torch.linalg.norm(CBrotaxis2, dim=-1, keepdim=True)+1e-8
-        
+
         CBrot1 = make_rot_axis(alphas[:,:,7,:], CBrotaxis1 )
         CBrot2 = make_rot_axis(alphas[:,:,8,:], CBrotaxis2 )
-        
+
         RTF8 = torch.einsum(
             'brij,brjk,brkl->bril', 
             RTF0, CBrot1,CBrot2)
-        
+
         # chi1 + CG bend
         RTF4 = torch.einsum(
             'brij,brjk,brkl,brlm->brim', 
@@ -304,7 +303,4 @@ class ComputeAllAtomCoords(nn.Module):
             RTframes.gather(2,self.base_indices[seq][...,None,None].repeat(1,1,1,4,4)), basexyzs
         )
 
-        if use_H:
-            return RTframes, xyzs[...,:3]
-        else:
-            return RTframes, xyzs[...,:14,:3]
+        return (RTframes, xyzs[...,:3]) if use_H else (RTframes, xyzs[...,:14,:3])

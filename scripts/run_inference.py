@@ -56,7 +56,7 @@ def main(conf: HydraConfig) -> None:
     # Loop over number of designs to sample.
     design_startnum = sampler.inf_conf.design_startnum
     if sampler.inf_conf.design_startnum == -1:
-        existing = glob.glob(sampler.inf_conf.output_prefix + "*.pdb")
+        existing = glob.glob(f"{sampler.inf_conf.output_prefix}*.pdb")
         indices = [-1]
         for e in existing:
             print(e)
@@ -75,7 +75,7 @@ def main(conf: HydraConfig) -> None:
         start_time = time.time()
         out_prefix = f"{sampler.inf_conf.output_prefix}_{i_des}"
         log.info(f"Making design {out_prefix}")
-        if sampler.inf_conf.cautious and os.path.exists(out_prefix + ".pdb"):
+        if sampler.inf_conf.cautious and os.path.exists(f"{out_prefix}.pdb"):
             log.info(
                 f"(cautious mode) Skipping this design because {out_prefix}.pdb already exists."
             )
@@ -160,9 +160,7 @@ def main(conf: HydraConfig) -> None:
 
         if sampler.inf_conf.write_trajectory:
             # trajectory pdbs
-            traj_prefix = (
-                os.path.dirname(out_prefix) + "/traj/" + os.path.basename(out_prefix)
-            )
+            traj_prefix = f"{os.path.dirname(out_prefix)}/traj/{os.path.basename(out_prefix)}"
             os.makedirs(os.path.dirname(traj_prefix), exist_ok=True)
 
             out = f"{traj_prefix}_Xt-1_traj.pdb"

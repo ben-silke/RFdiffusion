@@ -300,7 +300,7 @@ class IterBlock(nn.Module):
                  d_hidden=32, d_hidden_msa=None, p_drop=0.15,
                  SE3_param={'l0_in_features':32, 'l0_out_features':16, 'num_edge_features':32}):
         super(IterBlock, self).__init__()
-        if d_hidden_msa == None:
+        if d_hidden_msa is None:
             d_hidden_msa = d_hidden
 
         self.msa2msa = MSAPairStr2MSA(d_msa=d_msa, d_pair=d_pair,
@@ -310,7 +310,6 @@ class IterBlock(nn.Module):
                                       d_hidden=d_hidden_msa, p_drop=p_drop)
         self.msa2pair = MSA2Pair(d_msa=d_msa, d_pair=d_pair,
                                  d_hidden=d_hidden//2, p_drop=p_drop)
-                                 #d_hidden=d_hidden, p_drop=p_drop)
         self.pair2pair = PairStr2Pair(d_pair=d_pair, n_head=n_head_pair, 
                                       d_hidden=d_hidden, p_drop=p_drop)
         self.str2str = Str2Str(d_msa=d_msa, d_pair=d_pair,
@@ -344,30 +343,44 @@ class IterativeSimulator(nn.Module):
         self.n_extra_block = n_extra_block
         self.n_main_block = n_main_block
         self.n_ref_block = n_ref_block
-        
+
         self.proj_state = nn.Linear(SE3_param_topk['l0_out_features'], SE3_param_full['l0_out_features'])
         # Update with extra sequences
         if n_extra_block > 0:
-            self.extra_block = nn.ModuleList([IterBlock(d_msa=d_msa_full, d_pair=d_pair,
-                                                        n_head_msa=n_head_msa,
-                                                        n_head_pair=n_head_pair,
-                                                        d_hidden_msa=8,
-                                                        d_hidden=d_hidden,
-                                                        p_drop=p_drop,
-                                                        use_global_attn=True,
-                                                        SE3_param=SE3_param_full)
-                                                        for i in range(n_extra_block)])
+            self.extra_block = nn.ModuleList(
+                [
+                    IterBlock(
+                        d_msa=d_msa_full,
+                        d_pair=d_pair,
+                        n_head_msa=n_head_msa,
+                        n_head_pair=n_head_pair,
+                        d_hidden_msa=8,
+                        d_hidden=d_hidden,
+                        p_drop=p_drop,
+                        use_global_attn=True,
+                        SE3_param=SE3_param_full,
+                    )
+                    for _ in range(n_extra_block)
+                ]
+            )
 
         # Update with seed sequences
         if n_main_block > 0:
-            self.main_block = nn.ModuleList([IterBlock(d_msa=d_msa, d_pair=d_pair,
-                                                       n_head_msa=n_head_msa,
-                                                       n_head_pair=n_head_pair,
-                                                       d_hidden=d_hidden,
-                                                       p_drop=p_drop,
-                                                       use_global_attn=False,
-                                                       SE3_param=SE3_param_full)
-                                                       for i in range(n_main_block)])
+            self.main_block = nn.ModuleList(
+                [
+                    IterBlock(
+                        d_msa=d_msa,
+                        d_pair=d_pair,
+                        n_head_msa=n_head_msa,
+                        n_head_pair=n_head_pair,
+                        d_hidden=d_hidden,
+                        p_drop=p_drop,
+                        use_global_attn=False,
+                        SE3_param=SE3_param_full,
+                    )
+                    for _ in range(n_main_block)
+                ]
+            )
 
         self.proj_state2 = nn.Linear(SE3_param_full['l0_out_features'], SE3_param_topk['l0_out_features'])
         # Final SE(3) refinement
@@ -376,7 +389,7 @@ class IterativeSimulator(nn.Module):
                                        d_state=SE3_param_topk['l0_out_features'],
                                        SE3_param=SE3_param_topk,
                                        p_drop=p_drop)
-    
+
         self.reset_parameter()
     def reset_parameter(self):
         self.proj_state = init_lecun_normal(self.proj_state)
@@ -405,12 +418,12 @@ class IterativeSimulator(nn.Module):
         R_in = torch.eye(3, device=xyz_in.device).reshape(1,1,3,3).expand(B, L, -1, -1)
         T_in = xyz_in[:,:,1].clone()
         xyz_in = xyz_in - T_in.unsqueeze(-2)
-        
+
         state = self.proj_state(state)
 
-        R_s = list()
-        T_s = list()
-        alpha_s = list()
+        R_s = []
+        T_s = []
+        alpha_s = []
         for i_m in range(self.n_extra_block):
             R_in = R_in.detach() # detach rotation (for stability)
             T_in = T_in.detach()
@@ -435,7 +448,7 @@ class IterativeSimulator(nn.Module):
             T_in = T_in.detach()
             # Get current BB structure
             xyz = einsum('bnij,bnaj->bnai', R_in, xyz_in) + T_in.unsqueeze(-2)
-            
+
             msa, pair, R_in, T_in, state, alpha = self.main_block[i_m](msa, 
                                                                        pair,
                                                                        R_in, 
@@ -448,9 +461,9 @@ class IterativeSimulator(nn.Module):
             R_s.append(R_in)
             T_s.append(T_in)
             alpha_s.append(alpha)
-       
+
         state = self.proj_state2(state)
-        for i_m in range(self.n_ref_block):
+        for _ in range(self.n_ref_block):
             R_in = R_in.detach()
             T_in = T_in.detach()
             xyz = einsum('bnij,bnaj->bnai', R_in, xyz_in) + T_in.unsqueeze(-2)

@@ -99,12 +99,17 @@ class Slurm_HPC_Driver(HPC_Driver):
         ''' Return True if job with given id is complete
         '''
 
-        s = self.head_node_execute('', f'squeue -j {slurm_job_id} --noheader', return_='output', terminate_on_failure=False, silent=True)
-        if s: return False
-        else:
-            #self.tracer('Waiting for condor to finish the jobs... DONE')
-            self.jobs.remove(slurm_job_id)
-            return True  # jobs already finished, we return empty list to prevent double counting of cpu_usage
+        if s := self.head_node_execute(
+            '',
+            f'squeue -j {slurm_job_id} --noheader',
+            return_='output',
+            terminate_on_failure=False,
+            silent=True,
+        ):
+            if s: return False
+        #self.tracer('Waiting for condor to finish the jobs... DONE')
+        self.jobs.remove(slurm_job_id)
+        return True  # jobs already finished, we return empty list to prevent double counting of cpu_usage
 
 
     def cancel_job(self, slurm_job_id):
@@ -122,11 +127,15 @@ class Slurm_HPC_Driver(HPC_Driver):
         time = int( math.ceil(time*60) )
 
         if shell_wrapper:
-            shell_wrapper_sh = os.path.abspath(self.working_dir + f'/hpc.{name}.shell_wrapper.sh')
-            with open(shell_wrapper_sh, 'w') as f: f.write('#!/bin/bash\n{} {}\n'.format(executable, arguments));  os.fchmod(f.fileno(), stat.S_IEXEC | stat.S_IREAD | stat.S_IWRITE)
+            shell_wrapper_sh = os.path.abspath(
+                f'{self.working_dir}/hpc.{name}.shell_wrapper.sh'
+            )
+            with open(shell_wrapper_sh, 'w') as f:
+                f.write(f'#!/bin/bash\n{executable} {arguments}\n')
+                os.fchmod(f.fileno(), stat.S_IEXEC | stat.S_IREAD | stat.S_IWRITE)
             executable, arguments = shell_wrapper_sh, ''
 
-        slurm_file = working_dir + f'/.hpc.{name}.slurm'
+        slurm_file = f'{working_dir}/.hpc.{name}.slurm'
 
         with open(slurm_file, 'w') as f: f.write( _T_slurm_array_job_template_.format( **vars() ) )
 
@@ -138,11 +147,10 @@ class Slurm_HPC_Driver(HPC_Driver):
 
         self.jobs.append(slurm_job_id)
 
-        if block:
-            self.wait_until_complete( [slurm_job_id] )
-            return None
-
-        else: return slurm_job_id
+        if not block:
+            return slurm_job_id
+        self.wait_until_complete( [slurm_job_id] )
+        return None
 
 
 
@@ -155,11 +163,15 @@ class Slurm_HPC_Driver(HPC_Driver):
         time = int( math.ceil(time*60) )
 
         if shell_wrapper:
-            shell_wrapper_sh = os.path.abspath(self.working_dir + f'/hpc.{name}.shell_wrapper.sh')
-            with open(shell_wrapper_sh, 'w') as f: f.write('#!/bin/bash\n{} {}\n'.format(executable, arguments));  os.fchmod(f.fileno(), stat.S_IEXEC | stat.S_IREAD | stat.S_IWRITE)
+            shell_wrapper_sh = os.path.abspath(
+                f'{self.working_dir}/hpc.{name}.shell_wrapper.sh'
+            )
+            with open(shell_wrapper_sh, 'w') as f:
+                f.write(f'#!/bin/bash\n{executable} {arguments}\n')
+                os.fchmod(f.fileno(), stat.S_IEXEC | stat.S_IREAD | stat.S_IWRITE)
             executable, arguments = shell_wrapper_sh, ''
 
-        slurm_file = working_dir + f'/.hpc.{name}.slurm'
+        slurm_file = f'{working_dir}/.hpc.{name}.slurm'
 
         with open(slurm_file, 'w') as f: f.write( _T_slurm_mpi_job_template_.format( **vars() ) )
 
@@ -169,8 +181,7 @@ class Slurm_HPC_Driver(HPC_Driver):
 
         self.jobs.append(slurm_job_id)
 
-        if block:
-            self.wait_until_complete( [slurm_job_id] )
-            return None
-
-        else: return slurm_job_id
+        if not block:
+            return slurm_job_id
+        self.wait_until_complete( [slurm_job_id] )
+        return None

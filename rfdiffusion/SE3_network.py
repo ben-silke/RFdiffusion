@@ -20,25 +20,16 @@ class SE3TransformerWrapper(nn.Module):
         self.l1_in = l1_in_features
         #
         fiber_edge = Fiber({0: num_edge_features})
-        if l1_out_features > 0:
-            if l1_in_features > 0:
-                fiber_in = Fiber({0: l0_in_features, 1: l1_in_features})
-                fiber_hidden = Fiber.create(num_degrees, num_channels)
-                fiber_out = Fiber({0: l0_out_features, 1: l1_out_features})
-            else:
-                fiber_in = Fiber({0: l0_in_features})
-                fiber_hidden = Fiber.create(num_degrees, num_channels)
-                fiber_out = Fiber({0: l0_out_features, 1: l1_out_features})
+        if l1_in_features > 0:
+            fiber_in = Fiber({0: l0_in_features, 1: l1_in_features})
         else:
-            if l1_in_features > 0:
-                fiber_in = Fiber({0: l0_in_features, 1: l1_in_features})
-                fiber_hidden = Fiber.create(num_degrees, num_channels)
-                fiber_out = Fiber({0: l0_out_features})
-            else:
-                fiber_in = Fiber({0: l0_in_features})
-                fiber_hidden = Fiber.create(num_degrees, num_channels)
-                fiber_out = Fiber({0: l0_out_features})
-        
+            fiber_in = Fiber({0: l0_in_features})
+        if l1_out_features > 0:
+            fiber_hidden = Fiber.create(num_degrees, num_channels)
+            fiber_out = Fiber({0: l0_out_features, 1: l1_out_features})
+        else:
+            fiber_hidden = Fiber.create(num_degrees, num_channels)
+            fiber_out = Fiber({0: l0_out_features})
         self.se3 = SE3Transformer(num_layers=num_layers,
                                   fiber_in=fiber_in,
                                   fiber_hidden=fiber_hidden,
@@ -47,27 +38,27 @@ class SE3TransformerWrapper(nn.Module):
                                   channels_div=div,
                                   fiber_edge=fiber_edge,
                                   use_layer_norm=True)
-                                  #use_layer_norm=False)
-
         self.reset_parameter()
 
     def reset_parameter(self):
 
         # make sure linear layer before ReLu are initialized with kaiming_normal_
         for n, p in self.se3.named_parameters():
-            if "bias" in n:
+            if (
+                "bias" not in n
+                and len(p.shape) != 1
+                and "radial_func" in n
+                and "net.6" in n
+                or "bias" in n
+            ):
                 nn.init.zeros_(p)
-            elif len(p.shape) == 1:
-                continue
+            elif len(p.shape) != 1 and "radial_func" in n:
+                nn.init.kaiming_normal_(p, nonlinearity='relu')
+
+            elif len(p.shape) != 1:
+                p = init_lecun_normal_param(p)
             else:
-                if "radial_func" not in n:
-                    p = init_lecun_normal_param(p) 
-                else:
-                    if "net.6" in n:
-                        nn.init.zeros_(p)
-                    else:
-                        nn.init.kaiming_normal_(p, nonlinearity='relu')
-        
+                continue
         # make last layers to be zero-initialized
         #self.se3.graph_modules[-1].to_kernel_self['0'] = init_lecun_normal_param(self.se3.graph_modules[-1].to_kernel_self['0'])
         #self.se3.graph_modules[-1].to_kernel_self['1'] = init_lecun_normal_param(self.se3.graph_modules[-1].to_kernel_self['1'])

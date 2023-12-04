@@ -8,12 +8,7 @@ def generate_Cbeta(N, Ca, C):
     b = Ca - N
     c = C - Ca
     a = torch.cross(b, c, dim=-1)
-    # These are the values used during training
-    Cb = -0.58273431*a + 0.56802827*b - 0.54067466*c + Ca
-    # fd: below matches sidechain generator (=Rosetta params)
-    # Cb = -0.57910144 * a + 0.5689693 * b - 0.5441217 * c + Ca
-
-    return Cb
+    return -0.58273431*a + 0.56802827*b - 0.54067466*c + Ca
 
 
 def th_ang_v(ab, bc, eps: float = 1e-8):
@@ -284,13 +279,10 @@ def writepdb(
     Bfacts = torch.clamp(bfacts.cpu(), 0, 1)
     for i, s in enumerate(scpu):
         if chain_idx is None:
-            if binderlen is not None:
-                if i < binderlen:
-                    chain = "A"
-                else:
-                    chain = "B"
-            elif binderlen is None:
+            if binderlen is not None and i < binderlen or binderlen is None:
                 chain = "A"
+            else:
+                chain = "B"
         else:
             chain = chain_idx[i]
         if len(atomscpu.shape) == 2:
@@ -352,7 +344,7 @@ def writepdb(
 
         else:
             natoms = atomscpu.shape[1]
-            if natoms != 14 and natoms != 27:
+            if natoms not in [14, 27]:
                 print("bad size!", atoms.shape)
                 assert False
             atms = aa2long[s]
@@ -477,7 +469,7 @@ for i in range(22):
                 type2hb[a] == HbAtom.DA
             )
             lj_correction_parameters[i, j, 2] = type2hb[a] == HbAtom.HP
-            lj_correction_parameters[i, j, 3] = a == "SH1" or a == "HS"
+            lj_correction_parameters[i, j, 3] = a in ["SH1", "HS"]
 
 
 # hbond scoring parameters
@@ -492,7 +484,7 @@ def donorHs(D, bonds, atoms):
             idx_i = atoms.index(i)
             if idx_i >= 14:  # if atom j is a hydrogen
                 dHs.append(idx_i)
-    assert len(dHs) > 0
+    assert dHs
     return dHs
 
 
@@ -516,7 +508,7 @@ def acceptorBB0(A, hyb, bonds, atoms):
                 B0 = atoms.index(i)
                 if B0 < 14:
                     break
-    elif hyb == HbHybType.SP3 or hyb == HbHybType.RING:
+    elif hyb in [HbHybType.SP3, HbHybType.RING]:
         for i, j in bonds:
             if i == A:
                 B = atoms.index(j)

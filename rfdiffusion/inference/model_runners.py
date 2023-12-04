@@ -71,25 +71,25 @@ class Sampler:
         if conf.inference.ckpt_override_path is not None:
             self.ckpt_path = conf.inference.ckpt_override_path
             print("WARNING: You're overriding the checkpoint path from the defaults. Check that the model you're providing can run with the inputs you're providing.")
+        elif conf.contigmap.inpaint_seq is not None or conf.contigmap.provide_seq is not None or conf.contigmap.inpaint_str:
+            # use model trained for inpaint_seq
+            if conf.contigmap.provide_seq is not None:
+                # this is only used for partial diffusion
+                assert conf.diffuser.partial_T is not None, "The provide_seq input is specifically for partial diffusion"
+            self.ckpt_path = (
+                f'{model_directory}/InpaintSeq_Fold_ckpt.pt'
+                if conf.scaffoldguided.scaffoldguided
+                else f'{model_directory}/InpaintSeq_ckpt.pt'
+            )
+        elif conf.ppi.hotspot_res is not None and conf.scaffoldguided.scaffoldguided is False:
+            # use complex trained model
+            self.ckpt_path = f'{model_directory}/Complex_base_ckpt.pt'
+        elif conf.scaffoldguided.scaffoldguided is True:
+            # use complex and secondary structure-guided model
+            self.ckpt_path = f'{model_directory}/Complex_Fold_base_ckpt.pt'
         else:
-            if conf.contigmap.inpaint_seq is not None or conf.contigmap.provide_seq is not None or conf.contigmap.inpaint_str:
-                # use model trained for inpaint_seq
-                if conf.contigmap.provide_seq is not None:
-                    # this is only used for partial diffusion
-                    assert conf.diffuser.partial_T is not None, "The provide_seq input is specifically for partial diffusion"
-                if conf.scaffoldguided.scaffoldguided:
-                    self.ckpt_path = f'{model_directory}/InpaintSeq_Fold_ckpt.pt'
-                else:
-                    self.ckpt_path = f'{model_directory}/InpaintSeq_ckpt.pt'
-            elif conf.ppi.hotspot_res is not None and conf.scaffoldguided.scaffoldguided is False:
-                # use complex trained model
-                self.ckpt_path = f'{model_directory}/Complex_base_ckpt.pt'
-            elif conf.scaffoldguided.scaffoldguided is True:
-                # use complex and secondary structure-guided model
-                self.ckpt_path = f'{model_directory}/Complex_Fold_base_ckpt.pt'
-            else:
-                # use default model
-                self.ckpt_path = f'{model_directory}/Base_ckpt.pt'
+            # use default model
+            self.ckpt_path = f'{model_directory}/Base_ckpt.pt'
         # for saving in trb file:
         assert self._conf.inference.trb_save_ckpt_path is None, "trb_save_ckpt_path is not the place to specify an input model. Specify in inference.ckpt_override_path"
         self._conf['inference']['trb_save_ckpt_path']=self.ckpt_path
@@ -144,7 +144,7 @@ class Sampler:
             self.symmetry = None
 
         self.allatom = ComputeAllAtomCoords().to(self.device)
-        
+
         if self.inf_conf.input_pdb is None:
             # set default pdb
             script_dir=os.path.dirname(os.path.realpath(__file__))
@@ -228,7 +228,7 @@ class Sampler:
             pickle_dir = pickle_function_call(model, 'forward', 'inference')
             print(f'pickle_dir: {pickle_dir}')
         model = model.eval()
-        self._log.info(f'Loading checkpoint.')
+        self._log.info('Loading checkpoint.')
         model.load_state_dict(self.ckpt['model_state_dict'], strict=True)
         return model
 
@@ -407,7 +407,7 @@ class Sampler:
         return xt, seq_t
 
     def _preprocess(self, seq, xyz_t, t, repack=False):
-        
+
         """
         Function to prepare inputs to diffusion model
         
@@ -466,9 +466,9 @@ class Sampler:
             if seqt1d[idx,21] == 1:
                 seqt1d[idx,20] = 1
                 seqt1d[idx,21] = 0
-        
+
         t1d[:,:,:,:21] = seqt1d[None,None,:,:21]
-        
+
 
         # Set timestep feature to 1 where diffusion mask is True, else 1-t/T
         timefeature = torch.zeros((L)).float()
@@ -477,7 +477,7 @@ class Sampler:
         timefeature = timefeature[None,None,...,None]
 
         t1d = torch.cat((t1d, timefeature), dim=-1).float()
-        
+
         #############
         ### xyz_t ###
         #############
@@ -493,7 +493,7 @@ class Sampler:
         ### t2d ###
         ###########
         t2d = xyz_to_t2d(xyz_t)
-        
+
         ###########      
         ### idx ###
         ###########
@@ -519,7 +519,7 @@ class Sampler:
         t1d = t1d.to(self.device)
         t2d = t2d.to(self.device)
         alpha_t = alpha_t.to(self.device)
-        
+
         ######################
         ### added_features ###
         ######################
@@ -528,13 +528,13 @@ class Sampler:
             if self.ppi_conf.hotspot_res is None:
                 print("WARNING: you're using a model trained on complexes and hotspot residues, without specifying hotspots.\
                          If you're doing monomer diffusion this is fine")
-                hotspot_idx=[]
             else:
                 hotspots = [(i[0],int(i[1:])) for i in self.ppi_conf.hotspot_res]
-                hotspot_idx=[]
-                for i,res in enumerate(self.contig_map.con_ref_pdb_idx):
-                    if res in hotspots:
-                        hotspot_idx.append(self.contig_map.hal_idx0[i])
+                hotspot_idx = [
+                    self.contig_map.hal_idx0[i]
+                    for i, res in enumerate(self.contig_map.con_ref_pdb_idx)
+                    if res in hotspots
+                ]
                 hotspot_tens[hotspot_idx] = 1.0
 
             # Add blank (legacy) feature and hotspot tensor
@@ -812,8 +812,12 @@ class ScaffoldedSampler(SelfConditioning):
                     if i[1] + 1 != self.target_pdb['pdb_idx'][idx+1][1] or i[0] != self.target_pdb['pdb_idx'][idx+1][0]:
                         contig.append(f'{i[0]}{start}-{i[1]}/0 ')
                         start = self.target_pdb['pdb_idx'][idx+1][1]
-                contig.append(f"{self.target_pdb['pdb_idx'][-1][0]}{start}-{self.target_pdb['pdb_idx'][-1][1]}/0 ")
-                contig.append(f"{self.binderlen}-{self.binderlen}")
+                contig.extend(
+                    (
+                        f"{self.target_pdb['pdb_idx'][-1][0]}{start}-{self.target_pdb['pdb_idx'][-1][1]}/0 ",
+                        f"{self.binderlen}-{self.binderlen}",
+                    )
+                )
                 contig = ["".join(contig)]
             else:
                 contig = [f"{self.binderlen}-{self.binderlen}"]
@@ -822,10 +826,6 @@ class ScaffoldedSampler(SelfConditioning):
             self.mask_seq = self.diffusion_mask
             self.mask_str = self.diffusion_mask
             L_mapped=len(self.contig_map.ref)
-
-        ############################
-        ### Specific Contig mode ###
-        ############################
 
         else:
             # get contigmap from command line
@@ -851,18 +851,18 @@ class ScaffoldedSampler(SelfConditioning):
             assert L_mapped==self.adj.shape[0]
             diffusion_mask = self.mask_str
             self.diffusion_mask = diffusion_mask
-            
+
             xT = torch.full((1,1,L_mapped,27,3), np.nan)
             xT[:, :, contig_map.hal_idx0, ...] = xyz_27[contig_map.ref_idx0,...]
             xT = get_init_xyz(xT).squeeze()
             atom_mask = torch.full((L_mapped, 27), False)
             atom_mask[contig_map.hal_idx0] = mask_27[contig_map.ref_idx0]
- 
+
         ####################
         ### Get hotspots ###
         ####################
         self.hotspot_0idx=iu.get_idx0_hotspots(self.mappings, self.ppi_conf, self.binderlen)
-        
+
         #########################
         ### Set up potentials ###
         #########################

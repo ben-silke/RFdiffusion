@@ -10,8 +10,9 @@ class NT:  # named tuple
     def __repr__(self):
         r = 'NT: |'
         for i in dir(self):
-            if not i.startswith('__') and not isinstance(getattr(self, i), types.MethodType): r += '{} --> {}, '.format(i, getattr(self, i))
-        return r[:-2]+'|'
+            if not i.startswith('__') and not isinstance(getattr(self, i), types.MethodType):
+                r += f'{i} --> {getattr(self, i)}, '
+        return f'{r[:-2]}|'
 
 
 
@@ -34,12 +35,12 @@ def execute(message, command_line, return_='status', until_successes=False, term
 
         exit_code = p.returncode
 
-        if exit_code  and  not (silent or silence_output): tracer(output); sys.stdout.flush();
+        if exit_code and not silent and not silence_output: tracer(output); sys.stdout.flush();
 
-        if exit_code and until_successes: pass  # Thats right - redability COUNT!
-        else: break
+        if not exit_code or not until_successes:
+            break
 
-        tracer( "Error while executing {}: {}\n".format(message, output) )
+        tracer(f"Error while executing {message}: {output}\n")
         tracer("Sleeping 60s... then I will retry...")
         sys.stdout.flush();
         time.sleep(60)
@@ -48,11 +49,12 @@ def execute(message, command_line, return_='status', until_successes=False, term
 
     if exit_code and terminate_on_failure:
         tracer("\nEncounter error while executing: " + command_line)
-        if return_==True: return True
-        else: print("\nEncounter error while executing: " + command_line + '\n' + output); sys.exit(1)
+        if return_==True:
+            if return_==True: return True
+        print("\nEncounter error while executing: " + command_line + '\n' + output)
+        sys.exit(1)
 
-    if return_ == 'output': return output
-    else: return False
+    return output if return_ == 'output' else False
 
 
 def Sleep(time_, message, dict_={}):
@@ -91,11 +93,15 @@ class HPC_Driver:
 
     def execute(self, executable, arguments, working_dir, log_dir=None, name='_no_name_', memory=256, time=24, shell_wrapper=False, block=True):
         ''' Execute given command line on HPC cluster, must accumulate cpu hours in self.cpu_usage '''
-        if log_dir==None: log_dir=self.working_dir
+        if log_dir is None: log_dir=self.working_dir
 
         if shell_wrapper:
-            shell_wrapper_sh = os.path.abspath(self.working_dir + '/hpc.{}.shell_wrapper.sh'.format(name))
-            with file(shell_wrapper_sh, 'w') as f: f.write('#!/bin/bash\n{} {}\n'.format(executable, arguments));  os.fchmod(f.fileno(), stat.S_IEXEC | stat.S_IREAD | stat.S_IWRITE)
+            shell_wrapper_sh = os.path.abspath(
+                f'{self.working_dir}/hpc.{name}.shell_wrapper.sh'
+            )
+            with file(shell_wrapper_sh, 'w') as f:
+                f.write(f'#!/bin/bash\n{executable} {arguments}\n')
+                os.fchmod(f.fileno(), stat.S_IEXEC | stat.S_IREAD | stat.S_IWRITE)
             executable, arguments = shell_wrapper_sh, ''
 
         return self.submit_serial_hpc_job(name=name, executable=executable, arguments=arguments, working_dir=working_dir, log_dir=log_dir, jobs_to_queue=1, memory=memory, time=time, block=block, shell_wrapper=shell_wrapper)
@@ -167,7 +173,7 @@ class HPC_Driver:
                 #self.tracer("Waiting for HPC job(s) [{} process(es) in queue, {} process(es) running]...  \r".format(total_cpu_queued, total_cpu_running), end='')
                 #print "Waiting for {} HPC jobs to finish... [{} jobs in queue, {} jobs running]... Sleeping 32s...     \r".format(total_cpu_queued, cpu_queued+cpu_running, cpu_running),
 
-                self.set_daemon_message("Waiting for HPC {} job(s) to finish...".format( len(jobs) ) )
+                self.set_daemon_message(f"Waiting for HPC {len(jobs)} job(s) to finish...")
                 #self.tracer("Waiting for HPC {} job(s) to finish...".format( len(jobs) ) )
 
                 sys.stdout.flush()

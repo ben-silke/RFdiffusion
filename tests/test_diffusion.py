@@ -154,19 +154,18 @@ class TestSubmissionCommands(unittest.TestCase):
 def execute_through_pty(command_line):
     import pty, select
 
+    buffer = []
     if sys.platform == "darwin":
 
         master, slave = pty.openpty()
         p = subprocess.Popen(command_line, shell=True, stdout=slave, stdin=slave,
                              stderr=subprocess.STDOUT, close_fds=True)
 
-        buffer = []
         while True:
             try:
                 if select.select([master], [], [], 0.2)[0]:  # has something to read
-                    data = os.read(master, 1 << 22)
-                    if data: buffer.append(data)
-
+                    if data := os.read(master, 1 << 22):
+                        buffer.append(data)
                 elif (p.poll() is not None)  and  (not select.select([master], [], [], 0.2)[0] ): break  # process is finished and output buffer if fully read
 
             except OSError: break  # OSError will be raised when child process close PTY descriptior
@@ -175,9 +174,6 @@ def execute_through_pty(command_line):
 
         os.close(master)
         os.close(slave)
-
-        p.wait()
-        exit_code = p.returncode
 
         '''
         buffer = []
@@ -210,19 +206,18 @@ def execute_through_pty(command_line):
 
         os.close(slave)
 
-        buffer = []
         while True:
             try:
-                data = os.read(master, 1 << 22)
-                if data: buffer.append(data)
+                if data := os.read(master, 1 << 22):
+                    buffer.append(data)
             except OSError: break  # OSError will be raised when child process close PTY descriptior
 
         output = b''.join(buffer).decode(encoding='utf-8', errors='backslashreplace')
 
         os.close(master)
 
-        p.wait()
-        exit_code = p.returncode
+    p.wait()
+    exit_code = p.returncode
 
     return exit_code, output
 
@@ -236,29 +231,32 @@ def execute(message, command_line, return_='status', until_successes=False, term
         #exit_code, output = execute_through_pexpect(command_line)
         exit_code, output = execute_through_pty(command_line)
 
-        if (exit_code  and  not silence_output_on_errors) or  not (silent or silence_output): print(output); sys.stdout.flush();
+        if (
+            (exit_code and not silence_output_on_errors)
+            or not silent
+            and not silence_output
+        ): print(output); sys.stdout.flush();
 
-        if exit_code and until_successes: pass  # Thats right - redability COUNT!
-        else: break
+        if not exit_code or not until_successes:
+            break
 
-        print( "Error while executing {}: {}\n".format(message, output) )
+        print(f"Error while executing {message}: {output}\n")
         print("Sleeping 60s... then I will retry...")
         sys.stdout.flush();
         time.sleep(60)
 
     if add_message_and_command_line_to_output: output = message + '\nCommand line: ' + command_line + '\n' + output
 
-    if return_ == 'tuple'  or  return_ == tuple: return(exit_code, output)
+    if return_ in ['tuple', tuple]: return(exit_code, output)
 
     if exit_code and terminate_on_failure:
         print("\nEncounter error while executing: " + command_line)
-        if return_==True: return True
-        else:
-            print('\nEncounter error while executing: ' + command_line + '\n' + output);
-            raise BenchmarkError('\nEncounter error while executing: ' + command_line + '\n' + output)
+        if return_==True:
+            if return_==True: return True
+        print('\nEncounter error while executing: ' + command_line + '\n' + output);
+        raise BenchmarkError('\nEncounter error while executing: ' + command_line + '\n' + output)
 
-    if return_ == 'output': return output
-    else: return exit_code
+    return output if return_ == 'output' else exit_code
 
 
 if __name__ == "__main__":

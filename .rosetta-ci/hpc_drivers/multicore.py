@@ -82,7 +82,9 @@ class MultiCore_HPC_Driver(HPC_Driver):
         cpu_usage = -time_module.time()/60./60.
 
         if shell_wrapper:
-            shell_wrapper_sh = os.path.abspath(self.working_dir + f'/hpc.{name}.shell_wrapper.sh')
+            shell_wrapper_sh = os.path.abspath(
+                f'{self.working_dir}/hpc.{name}.shell_wrapper.sh'
+            )
             with open(shell_wrapper_sh, 'w') as f: f.write('#!/bin/bash\n{} {}\n'.format(executable, arguments));  os.fchmod(f.fileno(), stat.S_IEXEC | stat.S_IREAD | stat.S_IWRITE)
             executable, arguments = shell_wrapper_sh, ''
 
@@ -147,10 +149,14 @@ class MultiCore_HPC_Driver(HPC_Driver):
     def submit_mpi_hpc_job(self, name, executable, arguments, working_dir, log_dir, memory=512, time=12, block=True, process_coefficient="1", requested_nodes=1, requested_processes_per_node=1):
 
         if requested_nodes > 1:
-            print( "WARNING: " + str( requested_nodes ) + " nodes were requested, but we're running locally, so only 1 node will be used." )
+            print(
+                f"WARNING: {str(requested_nodes)} nodes were requested, but we're running locally, so only 1 node will be used."
+            )
 
         if requested_processes_per_node > self.cpu_count:
-            print( "WARNING: " + str(requested_processes_per_node) + " processes were requested, but I only have " + str(self.cpu_count) + " CPUs.  Will launch " + str(self.cpu_count) + " processes."  )
+            print(
+                f"WARNING: {str(requested_processes_per_node)} processes were requested, but I only have {str(self.cpu_count)} CPUs.  Will launch {str(self.cpu_count)} processes."
+            )
         actual_processes = min( requested_processes_per_node, self.cpu_count )
 
         cpu_usage = -time_module.time()/60./60.
