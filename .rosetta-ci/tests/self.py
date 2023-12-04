@@ -71,23 +71,29 @@ def run_regression_test(repository_root, working_dir, platform, config):
 
     sub_tests = [const, volatile, new]
 
-    const_dir = working_dir + '/' + const
+    const_dir = f'{working_dir}/{const}'
     os.mkdir(const_dir)
-    with open(const_dir + '/const_data', 'w') as f: f.write( '\n'.join( (str(i) for i in range(32) ) ) )
+    with open(f'{const_dir}/const_data', 'w') as f: f.write( '\n'.join( (str(i) for i in range(32) ) ) )
 
-    volatile_dir = working_dir + '/' + volatile
+    volatile_dir = f'{working_dir}/{volatile}'
     os.mkdir(volatile_dir)
-    with open(volatile_dir + '/const_data', 'w') as f: f.write( '\n'.join( (str(i) for i in range(32, 64) ) ) )
-    with open(volatile_dir + '/volatile_data', 'w') as f: f.write( '\n'.join( ( ''.join(random.sample( string.ascii_letters + string.digits, 8) ) for i in range(32) ) ) )
+    with open(f'{volatile_dir}/const_data', 'w') as f: f.write( '\n'.join( (str(i) for i in range(32, 64) ) ) )
+    with open(f'{volatile_dir}/volatile_data', 'w') as f:
+        f.write(
+            '\n'.join(
+                ''.join(random.sample(string.ascii_letters + string.digits, 8))
+                for _ in range(32)
+            )
+        )
 
-    new_dir = working_dir + '/' + new
+    new_dir = f'{working_dir}/{new}'
     os.mkdir(new_dir)
-    with open(new_dir + '/data', 'w') as f: f.write( '\n'.join( (str(i) for i in range(64)) ) )
+    with open(f'{new_dir}/data', 'w') as f: f.write( '\n'.join( (str(i) for i in range(64)) ) )
 
 
-    new_dir = working_dir + '/' + oversized
+    new_dir = f'{working_dir}/{oversized}'
     os.mkdir(new_dir)
-    with open(new_dir + '/large', 'w') as f: f.write( ('x'*63 + '\n')*16*1024*256 +'extra')
+    with open(f'{new_dir}/large', 'w') as f: f.write( ('x'*63 + '\n')*16*1024*256 +'extra')
 
     return {_StateKey_ : _S_queued_for_comparison_,  _ResultsKey_ : {},  _LogKey_ : f'sub-tests: {sub_tests!r}' }
 
@@ -117,9 +123,7 @@ def run_python_test(repository_root, working_dir, platform, config):
 
     python_environment = local_python_install(platform, config)
 
-    if platform['python'][0] == '2': pass
-    else:
-
+    if platform['python'][0] != '2':
         if platform['os'] == 'mac' and int( platform['python'].split('.')[1] ) > 6 :
             # SSL certificate test
             import urllib.request; urllib.request.urlopen('https://benchmark.graylab.jhu.edu')
@@ -144,7 +148,7 @@ def run_python_test(repository_root, working_dir, platform, config):
 
 
 
-    return {_StateKey_ : _S_passed_,  _ResultsKey_ : {},  _LogKey_ : f'Done!'}
+    return {_StateKey_: _S_passed_, _ResultsKey_: {}, _LogKey_: 'Done!'}
 
 
 
@@ -167,10 +171,31 @@ def compare(test, results, files_path, previous_results, previous_files_path):
 
     if previous_files_path:
         for test in os.listdir(files_path):
-            if os.path.isdir(files_path + '/' + test):
-                exclude = ''.join([' --exclude="{}"'.format(f) for f in ignore_files] ) + ' --exclude="*.ignore"'
-                res, brief_diff = execute('Comparing {}...'.format(test), 'diff -rq {exclude} {0}/{test} {1}/{test}'.format(previous_files_path, files_path, test=test, exclude=exclude), return_='tuple')
-                res, full_diff  = execute('Comparing {}...'.format(test), 'diff -r  {exclude} {0}/{test} {1}/{test}'.format(previous_files_path, files_path, test=test, exclude=exclude), return_='tuple')
+            if os.path.isdir(f'{files_path}/{test}'):
+                exclude = (
+                    ''.join([f' --exclude="{f}"' for f in ignore_files])
+                    + ' --exclude="*.ignore"'
+                )
+                res, brief_diff = execute(
+                    f'Comparing {test}...',
+                    'diff -rq {exclude} {0}/{test} {1}/{test}'.format(
+                        previous_files_path,
+                        files_path,
+                        test=test,
+                        exclude=exclude,
+                    ),
+                    return_='tuple',
+                )
+                res, full_diff = execute(
+                    f'Comparing {test}...',
+                    'diff -r  {exclude} {0}/{test} {1}/{test}'.format(
+                        previous_files_path,
+                        files_path,
+                        test=test,
+                        exclude=exclude,
+                    ),
+                    return_='tuple',
+                )
                 diff = 'Brief Diff:\n' + brief_diff + ( ('\n\nFull Diff:\n' + full_diff[:1024*1024*1]) if full_diff != brief_diff else '' )
 
                 state = _S_failed_ if res else _S_passed_
@@ -181,13 +206,17 @@ def compare(test, results, files_path, previous_results, previous_files_path):
 
     else: # no previous tests case, returning 'passed' for all sub_tests
         for test in os.listdir(files_path):
-            if os.path.isdir(files_path + '/' + test):
+            if os.path.isdir(f'{files_path}/{test}'):
                 results['tests'][test] = {_StateKey_: _S_passed_, _LogKey_: 'First run, no previous results available. Skipping comparison...\n'}
                 results['summary']['total'] += 1
 
     for test in os.listdir(files_path):
-        if os.path.isdir(files_path + '/' + test):
-            if os.path.isfile(files_path+'/'+test+'/.test_did_not_run.log')  or  os.path.isfile(files_path+'/'+test+'/.test_got_timeout_kill.log'):
+        if os.path.isdir(f'{files_path}/{test}'):
+            if os.path.isfile(
+                f'{files_path}/{test}/.test_did_not_run.log'
+            ) or os.path.isfile(
+                f'{files_path}/{test}/.test_got_timeout_kill.log'
+            ):
                 results['tests'][test][_StateKey_] = _S_script_failed_
                 results['tests'][test][_LogKey_] += '\nCompare(...): Marking as "Script failed" due to presense of .test_did_not_run.log or .test_got_timeout_kill.log file!\n'
                 if test not in results['summary']['failed_tests']:

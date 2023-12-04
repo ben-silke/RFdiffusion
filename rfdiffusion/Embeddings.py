@@ -126,7 +126,12 @@ class TemplatePairStack(nn.Module):
     def __init__(self, n_block=2, d_templ=64, n_head=4, d_hidden=16, p_drop=0.25):
         super(TemplatePairStack, self).__init__()
         self.n_block = n_block
-        proc_s = [PairStr2Pair(d_pair=d_templ, n_head=n_head, d_hidden=d_hidden, p_drop=p_drop) for i in range(n_block)]
+        proc_s = [
+            PairStr2Pair(
+                d_pair=d_templ, n_head=n_head, d_hidden=d_hidden, p_drop=p_drop
+            )
+            for _ in range(n_block)
+        ]
         self.block = nn.ModuleList(proc_s)
         self.norm = nn.LayerNorm(d_templ)
     def forward(self, templ, rbf_feat, use_checkpoint=False):
@@ -145,10 +150,14 @@ class TemplateTorsionStack(nn.Module):
         super(TemplateTorsionStack, self).__init__()
         self.n_block=n_block
         self.proj_pair = nn.Linear(d_templ+36, d_templ)
-        proc_s = [AttentionWithBias(d_in=d_templ, d_bias=d_templ,
-                                    n_head=n_head, d_hidden=d_hidden) for i in range(n_block)]
+        proc_s = [
+            AttentionWithBias(
+                d_in=d_templ, d_bias=d_templ, n_head=n_head, d_hidden=d_hidden
+            )
+            for _ in range(n_block)
+        ]
         self.row_attn = nn.ModuleList(proc_s)
-        proc_s = [FeedForwardLayer(d_templ, 4, p_drop=p_drop) for i in range(n_block)]
+        proc_s = [FeedForwardLayer(d_templ, 4, p_drop=p_drop) for _ in range(n_block)]
         self.ff = nn.ModuleList(proc_s)
         self.norm = nn.LayerNorm(d_templ)
 

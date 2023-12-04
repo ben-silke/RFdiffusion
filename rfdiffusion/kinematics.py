@@ -24,8 +24,7 @@ def get_pair_dist(a, b):
            stores paitwise distances between atoms in a and b
     """
 
-    dist = torch.cdist(a, b, p=2)
-    return dist
+    return torch.cdist(a, b, p=2)
 
 # ============================================================
 def get_ang(a, b, c):
@@ -80,9 +79,7 @@ def get_dih(a, b, c, d):
     x = torch.sum(v*w, dim=-1)
     y = torch.sum(torch.cross(b1,v,dim=-1)*w, dim=-1)
     output = torch.atan2(y, x)
-    if output_np:
-        return output.numpy()
-    return output
+    return output.numpy() if output_np else output
 
 # ============================================================
 def xyz_to_c6d(xyz, params=PARAMS):
@@ -293,7 +290,7 @@ def get_init_xyz(xyz_t):
     center_CA = ((~mask[:,:,:,None]) * torch.nan_to_num(xyz_t[:,:,:,1,:])).sum(dim=2) / ((~mask[:,:,:,None]).sum(dim=2)+1e-4) # (B, T, 3)
     xyz_t = xyz_t - center_CA.view(B,T,1,1,3)
     #
-    idx_s = list()
+    idx_s = []
     for i_b in range(B):
         for i_T in range(T):
             if mask[i_b, i_T].all():
@@ -304,6 +301,4 @@ def get_init_xyz(xyz_t):
             idx = torch.gather(exist_in_templ, -1, seqmap) # (L)
             offset_CA = torch.gather(xyz_t[i_b, i_T, :, 1, :], 0, idx.reshape(L,1).expand(-1,3))
             init[i_b,i_T] += offset_CA.reshape(L,1,3)
-    #
-    xyz = torch.where(mask.view(B, T, L, 1, 1), init, xyz_t)
-    return xyz
+    return torch.where(mask.view(B, T, L, 1, 1), init, xyz_t)

@@ -60,7 +60,8 @@ def setup_from_options(options):
     '''
     platform = dict(Platform)
 
-    if options.suffix: options.suffix = '.' + options.suffix
+    if options.suffix:
+        options.suffix = f'.{options.suffix}'
 
     platform['extras'] = options.extras.split(',') if options.extras else []
     platform['python'] = options.python
@@ -140,8 +141,10 @@ def setup_from_options(options):
     #print(f'Results path: {config["results_root"]}')
     #print('Config:{}, Platform:{}'.format(json.dumps(config, sort_keys=True, indent=2), Platform))
 
-    if options.compare: print('Comparing tests {} with suffixes: {}'.format(options.args, options.compare) )
-    else: print('Running tests: {}'.format(options.args) )
+    if options.compare:
+        print(f'Comparing tests {options.args} with suffixes: {options.compare}')
+    else:else
+        print(f'Running tests: {options.args}')
 
     if len(options.args) != 1: print('Error: Single test-name-to-run should be supplied!');  sys.exit(1)
     else:
@@ -156,7 +159,7 @@ def setup_from_options(options):
         working_dir = os.path.abspath( config['results_root'] + f'/{platform["os"]}.{test}{options.suffix}' )
 
 
-    if os.path.isdir(working_dir): shutil.rmtree(working_dir);  #print('Removing old job dir %s...' % working_dir)  # remove old dir if any
+    if os.path.isdir(working_dir): shutil.rmtree(working_dir)
     os.makedirs(working_dir)
 
     setup = Setup(
@@ -170,7 +173,7 @@ def setup_from_options(options):
     )
 
     setup_as_json = json.dumps( { k : getattr(setup, k) for k in setup.__slots__}, sort_keys=True, indent=2)
-    with open(working_dir + '/.setup.json', 'w') as f: f.write(setup_as_json)
+    with open(f'{working_dir}/.setup.json', 'w') as f: f.write(setup_as_json)
 
     #print(f'Detected hardware platform: {Platform}')
     print(f'Setup: {setup_as_json}')
@@ -194,13 +197,18 @@ def truncate_log(log):
             if len(lines) > 256: new = '\n'.join( lines[:32] + ['...truncated...'] + lines[-128:] )
 
         if len(new) > _max_log_size_: # going to try to truncate each individual line...
-            print(f'Trying to truncate log line-by-line...')
-            new = '\n'.join( (
-                ( line[:_max_line_size_//3] + '...truncated...' + line[-_max_line_size_//3:] ) if line > _max_line_size_ else line
-                for line in new_lines ) )
+            print('Trying to truncate log line-by-line...')
+            new = '\n'.join(
+                f'{line[:_max_line_size_ // 3]}...truncated...{line[-_max_line_size_ // 3:]}'
+                if line > _max_line_size_
+                else line
+                for line in new_lines
+            )
 
         if len(new) > _max_log_size_: # fall-back strategy in case all of the above failed...
-            print(f'WARNING: could not truncate log line-by-line, falling back to raw truncate...')
+            print(
+                'WARNING: could not truncate log line-by-line, falling back to raw truncate...'
+            )
             new = 'WARNING: could not truncate test log line-by-line, falling back to raw truncate!\n...truncated...\n' + ( '\n'.join(lines) )[-_max_log_size_+256:]
 
         print( 'Trunacting test output log: {0}MiB --> {1}MiB'.format(len(log)/1024/1024, len(new)/1024/1024) )
@@ -223,8 +231,7 @@ def find_test_description(test_name, test_script_file_name):
 
     def find_description_file(prefix, test_name):
         fname = prefix + test_name + '.md'
-        if os.path.isfile(fname): return fname
-        return prefix + 'md'
+        return fname if os.path.isfile(fname) else f'{prefix}md'
 
     description_file_name =  find_description_file( test_script_file_name[:-len('command.py')] + 'description.', test_name) if test_script_file_name.endswith('/command.py') else find_description_file(test_script_file_name[:-len('py')], test_name)
 
@@ -263,12 +270,12 @@ def run_test(setup):
 
     if setup.compare:
         #working_dir_1 = os.path.abspath( config['results_root'] + f'/{Platform["os"]}.{test}.{Options.compare[0]}' )
-        working_dir_1 = setup.working_dir + f'/{setup.compare[0]}'
+        working_dir_1 = f'{setup.working_dir}/{setup.compare[0]}'
 
-        working_dir_2        = setup.compare[1]  and  ( setup.working_dir + f'/{setup.compare[1]}' )
+        working_dir_2 = setup.compare[1] and f'{setup.working_dir}/{setup.compare[1]}'
         res_2_json_file_path = setup.compare[1]  and  f'{working_dir_2}/.execution.results.json'
 
-        with open(working_dir_1 + '/.execution.results.json') as f: res_1 = json.load(f).get(_ResultsKey_)
+        with open(f'{working_dir_1}/.execution.results.json') as f: res_1 = json.load(f).get(_ResultsKey_)
 
         if setup.compare[1] and ( not os.path.isfile(res_2_json_file_path) ):
             setup.compare[1] = None
@@ -276,7 +283,7 @@ def run_test(setup):
         else:
             state_override = None
 
-        if setup.compare[1] == None: res_2, working_dir_2 = None, None
+        if setup.compare[1] is None: res_2, working_dir_2 = None, None
         else:
             with open(res_2_json_file_path) as f: res_2 = json.load(f).get(_ResultsKey_)
 
@@ -296,12 +303,12 @@ def run_test(setup):
         # res[_LogKey_] = truncate_log( res[_LogKey_] )
 
         # # Caution! Some of the strings in the result object may be unicode. Be robust to unicode in the log messages.
-        with codecs.open(setup.working_dir+'/.comparison.log.txt', 'w', encoding='utf-8', errors='replace') as f: f.write(res[_LogKey_])
+        with codecs.open(f'{setup.working_dir}/.comparison.log.txt', 'w', encoding='utf-8', errors='replace') as f: f.write(res[_LogKey_])
         truncate_results_logs(res)
 
-        print( 'Comparison finished with output:\n{}'.format( res[_LogKey_] ) )
+        print(f'Comparison finished with output:\n{res[_LogKey_]}')
 
-        with open(setup.working_dir+'/.comparison.results.json', 'w') as f: json.dump(res, f, sort_keys=True, indent=2)
+        with open(f'{setup.working_dir}/.comparison.results.json', 'w') as f: json.dump(res, f, sort_keys=True, indent=2)
 
         #print( 'Comparison finished with results:\n{}'.format( json.dumps(res, sort_keys=True, indent=2) ) )
         if 'summary' in res: print('Summary section:\n{}'.format( json.dumps(res['summary'], sort_keys=True, indent=2) ) )
@@ -313,7 +320,16 @@ def run_test(setup):
         working_dir = setup.working_dir  #os.path.abspath( setup.config['results_root'] + f'/{platform["os"]}.{test}{options.suffix}' )
 
         hpc_driver_name = setup.config['hpc_driver']
-        hpc_driver = None if hpc_driver_name in ['', 'none'] else eval(hpc_driver_name + '_HPC_Driver')(working_dir, setup.config, tracer=print, set_daemon_message=lambda x:None)
+        hpc_driver = (
+            None
+            if hpc_driver_name in ['', 'none']
+            else eval(f'{hpc_driver_name}_HPC_Driver')(
+                working_dir,
+                setup.config,
+                tracer=print,
+                set_daemon_message=lambda x: None,
+            )
+        )
 
         api_version = test_suite._api_version_ if hasattr(test_suite, '_api_version_') else ''
 
@@ -328,18 +344,21 @@ def run_test(setup):
         if not isinstance(res, dict): print(f'Test returned result of type {type(res)} while dict-like object was expected, please check that test-script have correct `return` statment! Terminating...'); sys.exit(1)
 
         # Caution! Some of the strings in the result object may be unicode. Be robust to unicode in the log messages
-        with codecs.open(working_dir+'/.execution.log.txt', 'w', encoding='utf-8', errors='replace') as f: f.write( res[_LogKey_] )
+        with codecs.open(f'{working_dir}/.execution.log.txt', 'w', encoding='utf-8', errors='replace') as f: f.write( res[_LogKey_] )
 
         # res[_LogKey_] = truncate_log( res[_LogKey_] )
         truncate_results_logs(res)
 
         if _DescriptionKey_ not in res: res[_DescriptionKey_] = test_description
 
-        if res[_StateKey_] not in _S_Values_: print( 'Warning!!! Test {} failed with unknow result code: {}'.format(test_name, res[_StateKey_]) )
+        if res[_StateKey_] not in _S_Values_:
+            print(
+                f'Warning!!! Test {test_name} failed with unknow result code: {res[_StateKey_]}'
+            )
         else: print( f'Test {test} finished with output:\n{res[_LogKey_]}\n----------------------------------------------------------------\nState: {res[_StateKey_]!r} | ', end='')
 
         # JSON by default serializes to an ascii-encoded format
-        with open(working_dir+'/.execution.results.json', 'w') as f: json.dump(res, f, sort_keys=True, indent=2)
+        with open(f'{working_dir}/.execution.results.json', 'w') as f: json.dump(res, f, sort_keys=True, indent=2)
 
         print( f'Output and full log of this test saved to:\n{working_dir}/.execution.results.json\n{working_dir}/.execution.log.txt' )
 
@@ -391,9 +410,13 @@ def main(args):
 
     options = parser.parse_args(args=args[1:])
 
-    if any( [a.startswith('-') for a in options.args] ) :
+    if any(a.startswith('-') for a in options.args):
         print( '\nWARNING WARNING WARNING WARNING\n' )
-        print( '\tInterpreting', ' '.join(["'"+a+"'" for a in options.args if a.startswith('-')]), 'as test name(s), rather than as option(s).'  )
+        print(
+            '\tInterpreting',
+            ' '.join([f"'{a}'" for a in options.args if a.startswith('-')]),
+            'as test name(s), rather than as option(s).',
+        )
         print( "\tTry moving it before any test name, if that's not what you want."  )
         print( '\nWARNING WARNING WARNING WARNING\n'  )
 

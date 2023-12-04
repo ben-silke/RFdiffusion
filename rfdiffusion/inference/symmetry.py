@@ -73,8 +73,8 @@ class SymGen:
             self.apply_symmetry = self._apply_octahedral
 
         elif global_sym.lower() in saved_symmetries:
-            # Using a saved symmetry 
-            self._log.info('Initializing %s symmetry order.'%global_sym)
+            # Using a saved symmetry
+            self._log.info(f'Initializing {global_sym} symmetry order.')
             self._init_from_symrots_file(global_sym)
 
             # Applied the same way as cyclic symmetry
@@ -193,7 +193,7 @@ class SymGen:
 
         sets self.sym_rots to be a list of torch.tensor of shape [3, 3]
         """
-        assert name in saved_symmetries, name + " not in " + str(saved_symmetries)
+        assert name in saved_symmetries, f"{name} not in {str(saved_symmetries)}"
 
         # Load in list of rotation matrices for `name`
         fn = f"{pathlib.Path(__file__).parent.resolve()}/sym_rots.npz"
@@ -201,9 +201,9 @@ class SymGen:
         symms = None
         for k, v in obj.items():
             if str(k) == name: symms = v
-        assert symms is not None, "%s not found in %s"%(name, fn)
+        assert symms is not None, f"{name} not found in {fn}"
 
-        
+
         self.sym_rots =  [torch.tensor(v_i, dtype=torch.float32) for v_i in symms]
         self.order = len(self.sym_rots)
 
@@ -229,8 +229,8 @@ class SymGen:
         rel_rot = lambda M: np.linalg.norm(Rotation.from_matrix(M).as_rotvec())
         rel_rots = [(i+1, rel_rot(M)) for i, M in enumerate(self.sym_rots[1:])]
         min_rot = min(rel_rot_val[1] for rel_rot_val in rel_rots)
-        close_rots = [np.eye(3)] + [
-                self.sym_rots[i] for i, rel_rot_val in rel_rots if
-                np.isclose(rel_rot_val, min_rot)
-                ]
-        return close_rots
+        return [np.eye(3)] + [
+            self.sym_rots[i]
+            for i, rel_rot_val in rel_rots
+            if np.isclose(rel_rot_val, min_rot)
+        ]

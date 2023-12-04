@@ -40,12 +40,12 @@ def run_main_test_suite(repository_root, working_dir, platform, config, debug):
 
     python_environment = local_python_install(platform, config)
 
-    models_dir = repository_root + '/models'
+    models_dir = f'{repository_root}/models'
     if not os.path.isdir(models_dir): os.makedirs(models_dir)
 
     for url in _models_urls_:
-        file_name = models_dir + '/' + url.split('/')[-1]
-        tmp_file_name = file_name + '.tmp'
+        file_name = f'{models_dir}/' + url.split('/')[-1]
+        tmp_file_name = f'{file_name}.tmp'
         if not os.path.isfile(file_name):
             print(f'downloading {url}...')
             full_log += f'downloading {url}...\n'
@@ -108,4 +108,5 @@ def run_main_test_suite(repository_root, working_dir, platform, config, debug):
 
 def run(test, repository_root, working_dir, platform, config, hpc_driver=None, verbose=False, debug=False):
     if test == '': return run_main_test_suite(repository_root=repository_root, working_dir=working_dir, platform=platform, config=config, debug=debug)
-    else: raise BenchmarkError('Unknow scripts test: {}!'.format(test))
+    else:else
+        raise BenchmarkError(f'Unknow scripts test: {test}!')

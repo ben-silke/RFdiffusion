@@ -13,7 +13,9 @@ except:
 def main():
     args=get_args()
     assert args.input_pdb or args.pdb_dir is not None, 'Need to provide either an input pdb (--input_pdb) or a path to pdbs (--pdb_dir)'
-    assert not (args.input_pdb is not None and args.pdb_dir is not None), 'Need to provide either --input_pdb or --pdb_dir, not both'
+    assert (
+        args.input_pdb is None or args.pdb_dir is None
+    ), 'Need to provide either --input_pdb or --pdb_dir, not both'
 
     os.makedirs(args.out_dir, exist_ok=True)
     if args.pdb_dir is not None:
@@ -36,8 +38,7 @@ def get_args():
     parser.add_argument("--pdb_dir",required=False, help="path to directory of pdbs. Either pass this or the path to a specific pdb (--input_pdb)", default=None)
     parser.add_argument("--input_pdb", required=False, help="path to input pdb. Either provide this of path to directory of pdbs (--pdb_dir)", default=None)
     parser.add_argument("--out_dir",dest="out_dir", required=True, help='need to specify an output path')
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
 
 
 def extract_secstruc(fn):
@@ -52,10 +53,11 @@ def extract_secstruc(fn):
         dssp.Dssp(pose).insert_ss_into_pose(pose, True)
         aa_sequence = pose.sequence()
         secstruct = pose.secstruct()
-    secstruc_dict = {'sequence':[i for i in aa_sequence],
-                     'idx':[int(i) for i in idx],
-                     'ss':[i for i in secstruct]}
-    return secstruc_dict
+    return {
+        'sequence': list(aa_sequence),
+        'idx': [int(i) for i in idx],
+        'ss': list(secstruct),
+    }
 
 def ss_to_tensor(ss):
     """
@@ -84,7 +86,6 @@ def mask_ss(ss, idx, min_mask = 0, max_mask = 1.0):
             ss[start+offset:start+offset+width] = 3
         except:
             stuck_counter += 1
-            pass
     ss = torch.tensor(ss)
     ss = torch.nn.functional.one_hot(ss, num_classes=4)
     ss = torch.cat((ss, torch.tensor(idx)[...,None]), dim=-1)
@@ -94,16 +95,12 @@ def mask_ss(ss, idx, min_mask = 0, max_mask = 1.0):
 
 def generate_Cbeta(N,Ca,C):
     # recreate Cb given N,Ca,C
-    b = Ca - N 
+    b = Ca - N
     c = C - Ca
     a = torch.cross(b, c, dim=-1)
-    #Cb = -0.58273431*a + 0.56802827*b - 0.54067466*c + Ca
-    # fd: below matches sidechain generator (=Rosetta params)
-    Cb = -0.57910144*a + 0.5689693*b - 0.5441217*c + Ca
+    return -0.57910144*a + 0.5689693*b - 0.5441217*c + Ca
 
-    return Cb
-
-def get_pair_dist(a, b): 
+def get_pair_dist(a, b):
     """calculate pair distances between two sets of points
     
     Parameters
@@ -116,8 +113,7 @@ def get_pair_dist(a, b):
            stores paitwise distances between atoms in a and b
     """
 
-    dist = torch.cdist(a, b, p=2)
-    return dist
+    return torch.cdist(a, b, p=2)
 
 
 def construct_block_adj_matrix( sstruct, xyz, cutoff=6, include_loops=False ):
@@ -139,15 +135,15 @@ def construct_block_adj_matrix( sstruct, xyz, cutoff=6, include_loops=False ):
     '''
 
     L = xyz.shape[0]
-    
+
     # three anchor atoms
     N  = xyz[:,0]
     Ca = xyz[:,1]
     C  = xyz[:,2]
-    
+
     # recreate Cb given N,Ca,C
     Cb = generate_Cbeta(N,Ca,C)
-    
+
     # May need a batch dimension - NRB
     dist = get_pair_dist(Cb,Cb) # [L,L]
     dist[torch.isnan(dist)] = 999.9
@@ -155,7 +151,7 @@ def construct_block_adj_matrix( sstruct, xyz, cutoff=6, include_loops=False ):
     dist += 999.9*torch.eye(L,device=xyz.device)
     # Now we have dist matrix and sstruct specification, turn this into a block adjacency matrix
     # There is probably a way to do this in closed-form with a beautiful einsum but I am going to do the loop approach
-    
+
     # First: Construct a list of segments and the index at which they begin and end
     in_segment = True
     segments = []
@@ -169,14 +165,14 @@ def construct_block_adj_matrix( sstruct, xyz, cutoff=6, include_loops=False ):
             begin = 0 
             continue
 
-        if not sstruct[i] == sstruct[i-1]:
+        if sstruct[i] != sstruct[i - 1]:
             end = i 
             segments.append( (sstruct[i-1], begin, end) )
 
             begin = i
 
     # Ending edge case: last segment is length one
-    if not end == sstruct.shape[0]:
+    if end != sstruct.shape[0]:
         segments.append( (sstruct[-1], begin, sstruct.shape[0]) )
 
 
@@ -216,13 +212,18 @@ def parse_pdb_lines_torch(lines):
         idx = ( l[21:22].strip(), int(l[22:26].strip()) )
         if idx not in pdb_idx:
           pdb_idx.append(idx)
- 
+
     # 4 BB + up to 10 SC atoms
     xyz = np.full((len(pdb_idx), 27, 3), np.nan, dtype=np.float32)
     for l in lines:
         if l[:4] != "ATOM":
             continue
-        chain, resNo, atom, aa = l[21:22], int(l[22:26]), ' '+l[12:16].strip().ljust(3), l[17:20]
+        chain, resNo, atom, aa = (
+            l[21:22],
+            int(l[22:26]),
+            f' {l[12:16].strip().ljust(3)}',
+            l[17:20],
+        )
         idx = pdb_idx.index((chain,resNo))
         for i_atm, tgtatm in enumerate(aa2long[aa2num[aa]]):
             if tgtatm == atom:
@@ -244,22 +245,27 @@ def parse_pdb_lines(lines, parse_hetatom=False, ignore_het_h=True):
     res = [(l[22:26],l[17:20]) for l in lines if l[:4]=="ATOM" and l[12:16].strip()=="CA"]
     seq = [aa2num[r[1]] if r[1] in aa2num.keys() else 20 for r in res]
     pdb_idx = [( l[21:22].strip(), int(l[22:26].strip()) ) for l in lines if l[:4]=="ATOM" and l[12:16].strip()=="CA"]  # chain letter, res num
-    
+
     # 4 BB + up to 10 SC atoms
     xyz = np.full((len(res), 27, 3), np.nan, dtype=np.float32)
     for l in lines:
         if l[:4] != "ATOM":
             continue
-        chain, resNo, atom, aa = l[21:22], int(l[22:26]), ' '+l[12:16].strip().ljust(3), l[17:20]
+        chain, resNo, atom, aa = (
+            l[21:22],
+            int(l[22:26]),
+            f' {l[12:16].strip().ljust(3)}',
+            l[17:20],
+        )
         idx = pdb_idx.index((chain,resNo))
         for i_atm, tgtatm in enumerate(aa2long[aa2num[aa]]):
             if tgtatm is not None and tgtatm.strip() == atom.strip(): # ignore whitespace
                 xyz[idx,i_atm,:] = [float(l[30:38]), float(l[38:46]), float(l[46:54])]
                 break
-        
+
     # save atom mask
     mask = np.logical_not(np.isnan(xyz[...,0]))
-    xyz[np.isnan(xyz[...,0])] = 0.0 
+    xyz[np.isnan(xyz[...,0])] = 0.0
     # remove duplicated (chain, resi)
     new_idx = []
     i_unique = []
@@ -267,7 +273,7 @@ def parse_pdb_lines(lines, parse_hetatom=False, ignore_het_h=True):
         if idx not in new_idx:
             new_idx.append(idx)
             i_unique.append(i)
-    
+
     pdb_idx = new_idx
     xyz = xyz[i_unique]
     mask = mask[i_unique]
@@ -333,171 +339,171 @@ aa2long=[
 ]
 
 def get_sse(ca_coord):
-  '''
+    '''
   calculates the SSE of a peptide chain based on the P-SEA algorithm (Labesse 1997)
   code borrowed from biokite: https://github.com/biokit/biokit
   '''
-  def vector_dot(v1,v2): return (v1*v2).sum(-1)
-  def norm_vector(v): return v / np.linalg.norm(v, axis=-1, keepdims=True)
-  def displacement(atoms1, atoms2):
-    v1 = np.asarray(atoms1)
-    v2 = np.asarray(atoms2)
-    if len(v1.shape) <= len(v2.shape):
-      diff = v2 - v1
-    else:
-      diff = -(v1 - v2)
-    return diff
-  def distance(atoms1, atoms2):
-    diff = displacement(atoms1, atoms2)
-    return np.sqrt(vector_dot(diff, diff))
+    def vector_dot(v1,v2): return (v1*v2).sum(-1)
 
-  def angle(atoms1, atoms2, atoms3):
-    v1 = norm_vector(displacement(atoms1, atoms2))
-    v2 = norm_vector(displacement(atoms3, atoms2))
-    return np.arccos(vector_dot(v1,v2))
+    def norm_vector(v): return v / np.linalg.norm(v, axis=-1, keepdims=True)
 
-  def dihedral(atoms1, atoms2, atoms3, atoms4):
-    v1 = norm_vector(displacement(atoms1, atoms2))
-    v2 = norm_vector(displacement(atoms2, atoms3))
-    v3 = norm_vector(displacement(atoms3, atoms4))
-    
-    n1 = np.cross(v1, v2)
-    n2 = np.cross(v2, v3)
-    
-    # Calculation using atan2, to ensure the correct sign of the angle 
-    x = vector_dot(n1,n2)
-    y = vector_dot(np.cross(n1,n2), v2)
-    return np.arctan2(y,x)
+    def displacement(atoms1, atoms2):
+        v1 = np.asarray(atoms1)
+        v2 = np.asarray(atoms2)
+        diff = v2 - v1 if len(v1.shape) <= len(v2.shape) else -(v1 - v2)
+        return diff
 
-  _radians_to_angle = 2*np.pi/360
+    def distance(atoms1, atoms2):
+      diff = displacement(atoms1, atoms2)
+      return np.sqrt(vector_dot(diff, diff))
 
-  _r_helix = ((89-12)*_radians_to_angle, (89+12)*_radians_to_angle)
-  _a_helix = ((50-20)*_radians_to_angle, (50+20)*_radians_to_angle)
-  _d2_helix = ((5.5-0.5), (5.5+0.5))
-  _d3_helix = ((5.3-0.5), (5.3+0.5))
-  _d4_helix = ((6.4-0.6), (6.4+0.6))
+    def angle(atoms1, atoms2, atoms3):
+      v1 = norm_vector(displacement(atoms1, atoms2))
+      v2 = norm_vector(displacement(atoms3, atoms2))
+      return np.arccos(vector_dot(v1,v2))
 
-  _r_strand = ((124-14)*_radians_to_angle, (124+14)*_radians_to_angle)
-  _a_strand = ((-180)*_radians_to_angle, (-125)*_radians_to_angle,
-              (145)*_radians_to_angle, (180)*_radians_to_angle)
-  _d2_strand = ((6.7-0.6), (6.7+0.6))
-  _d3_strand = ((9.9-0.9), (9.9+0.9))
-  _d4_strand = ((12.4-1.1), (12.4+1.1))
+    def dihedral(atoms1, atoms2, atoms3, atoms4):
+      v1 = norm_vector(displacement(atoms1, atoms2))
+      v2 = norm_vector(displacement(atoms2, atoms3))
+      v3 = norm_vector(displacement(atoms3, atoms4))
 
-  # Filter all CA atoms in the relevant chain.
+      n1 = np.cross(v1, v2)
+      n2 = np.cross(v2, v3)
 
-  d2i_coord = np.full(( len(ca_coord), 2, 3 ), np.nan)
-  d3i_coord = np.full(( len(ca_coord), 2, 3 ), np.nan)
-  d4i_coord = np.full(( len(ca_coord), 2, 3 ), np.nan)
-  ri_coord = np.full(( len(ca_coord), 3, 3 ), np.nan)
-  ai_coord = np.full(( len(ca_coord), 4, 3 ), np.nan)
-  
-  # The distances and angles are not defined for the entire interval,
-  # therefore the indices do not have the full range
-  # Values that are not defined are NaN
-  for i in range(1, len(ca_coord)-1): d2i_coord[i] = (ca_coord[i-1], ca_coord[i+1])
-  for i in range(1, len(ca_coord)-2): d3i_coord[i] = (ca_coord[i-1], ca_coord[i+2])
-  for i in range(1, len(ca_coord)-3): d4i_coord[i] = (ca_coord[i-1], ca_coord[i+3])
-  for i in range(1, len(ca_coord)-1): ri_coord[i]  = (ca_coord[i-1], ca_coord[i], ca_coord[i+1])
-  for i in range(1, len(ca_coord)-2): ai_coord[i]  = (ca_coord[i-1], ca_coord[i], ca_coord[i+1], ca_coord[i+2])
-  
-  d2i = distance(d2i_coord[:,0], d2i_coord[:,1])
-  d3i = distance(d3i_coord[:,0], d3i_coord[:,1])
-  d4i = distance(d4i_coord[:,0], d4i_coord[:,1])
-  ri = angle(ri_coord[:,0], ri_coord[:,1], ri_coord[:,2])
-  ai = dihedral(ai_coord[:,0], ai_coord[:,1], ai_coord[:,2], ai_coord[:,3])
-  
-  sse = ["L"] * len(ca_coord)
-  
-  # Annotate helices
-  # Find CA that meet criteria for potential helices
-  is_pot_helix = np.zeros(len(sse), dtype=bool)
-  for i in range(len(sse)):
-    if (
-            d3i[i] >= _d3_helix[0] and d3i[i] <= _d3_helix[1]
-        and d4i[i] >= _d4_helix[0] and d4i[i] <= _d4_helix[1]
-        ) or (
-            ri[i] >= _r_helix[0] and ri[i] <= _r_helix[1]
-        and ai[i] >= _a_helix[0] and ai[i] <= _a_helix[1]
-        ):
-          is_pot_helix[i] = True
-  # Real helices are 5 consecutive helix elements
-  is_helix = np.zeros(len(sse), dtype=bool)
-  counter = 0
-  for i in range(len(sse)):
-    if is_pot_helix[i]:
-      counter += 1
-    else:
-      if counter >= 5:
-        is_helix[i-counter : i] = True
-      counter = 0
-  # Extend the helices by one at each end if CA meets extension criteria
-  i = 0
-  while i < len(sse):
-    if is_helix[i]:
-      sse[i] = "H"
+      # Calculation using atan2, to ensure the correct sign of the angle 
+      x = vector_dot(n1,n2)
+      y = vector_dot(np.cross(n1,n2), v2)
+      return np.arctan2(y,x)
+
+    _radians_to_angle = 2*np.pi/360
+
+    _r_helix = ((89-12)*_radians_to_angle, (89+12)*_radians_to_angle)
+    _a_helix = ((50-20)*_radians_to_angle, (50+20)*_radians_to_angle)
+    _d2_helix = ((5.5-0.5), (5.5+0.5))
+    _d3_helix = ((5.3-0.5), (5.3+0.5))
+    _d4_helix = ((6.4-0.6), (6.4+0.6))
+
+    _r_strand = ((124-14)*_radians_to_angle, (124+14)*_radians_to_angle)
+    _a_strand = ((-180)*_radians_to_angle, (-125)*_radians_to_angle,
+                (145)*_radians_to_angle, (180)*_radians_to_angle)
+    _d2_strand = ((6.7-0.6), (6.7+0.6))
+    _d3_strand = ((9.9-0.9), (9.9+0.9))
+    _d4_strand = ((12.4-1.1), (12.4+1.1))
+
+    # Filter all CA atoms in the relevant chain.
+
+    d2i_coord = np.full(( len(ca_coord), 2, 3 ), np.nan)
+    d3i_coord = np.full(( len(ca_coord), 2, 3 ), np.nan)
+    d4i_coord = np.full(( len(ca_coord), 2, 3 ), np.nan)
+    ri_coord = np.full(( len(ca_coord), 3, 3 ), np.nan)
+    ai_coord = np.full(( len(ca_coord), 4, 3 ), np.nan)
+
+    # The distances and angles are not defined for the entire interval,
+    # therefore the indices do not have the full range
+    # Values that are not defined are NaN
+    for i in range(1, len(ca_coord)-1): d2i_coord[i] = (ca_coord[i-1], ca_coord[i+1])
+    for i in range(1, len(ca_coord)-2): d3i_coord[i] = (ca_coord[i-1], ca_coord[i+2])
+    for i in range(1, len(ca_coord)-3): d4i_coord[i] = (ca_coord[i-1], ca_coord[i+3])
+    for i in range(1, len(ca_coord)-1): ri_coord[i]  = (ca_coord[i-1], ca_coord[i], ca_coord[i+1])
+    for i in range(1, len(ca_coord)-2): ai_coord[i]  = (ca_coord[i-1], ca_coord[i], ca_coord[i+1], ca_coord[i+2])
+
+    d2i = distance(d2i_coord[:,0], d2i_coord[:,1])
+    d3i = distance(d3i_coord[:,0], d3i_coord[:,1])
+    d4i = distance(d4i_coord[:,0], d4i_coord[:,1])
+    ri = angle(ri_coord[:,0], ri_coord[:,1], ri_coord[:,2])
+    ai = dihedral(ai_coord[:,0], ai_coord[:,1], ai_coord[:,2], ai_coord[:,3])
+
+    sse = ["L"] * len(ca_coord)
+
+    # Annotate helices
+    # Find CA that meet criteria for potential helices
+    is_pot_helix = np.zeros(len(sse), dtype=bool)
+    for i in range(len(sse)):
       if (
-          d3i[i-1] >= _d3_helix[0] and d3i[i-1] <= _d3_helix[1]
+              d3i[i] >= _d3_helix[0] and d3i[i] <= _d3_helix[1]
+          and d4i[i] >= _d4_helix[0] and d4i[i] <= _d4_helix[1]
           ) or (
-          ri[i-1] >= _r_helix[0] and ri[i-1] <= _r_helix[1]
+              ri[i] >= _r_helix[0] and ri[i] <= _r_helix[1]
+          and ai[i] >= _a_helix[0] and ai[i] <= _a_helix[1]
           ):
-            sse[i-1] = "H"
-      sse[i] = "H"
-      if (
-          d3i[i+1] >= _d3_helix[0] and d3i[i+1] <= _d3_helix[1]
+            is_pot_helix[i] = True
+    # Real helices are 5 consecutive helix elements
+    is_helix = np.zeros(len(sse), dtype=bool)
+    counter = 0
+    for i in range(len(sse)):
+      if is_pot_helix[i]:
+        counter += 1
+      else:
+        if counter >= 5:
+          is_helix[i-counter : i] = True
+        counter = 0
+    # Extend the helices by one at each end if CA meets extension criteria
+    i = 0
+    while i < len(sse):
+      if is_helix[i]:
+        sse[i] = "H"
+        if (
+            d3i[i-1] >= _d3_helix[0] and d3i[i-1] <= _d3_helix[1]
+            ) or (
+            ri[i-1] >= _r_helix[0] and ri[i-1] <= _r_helix[1]
+            ):
+              sse[i-1] = "H"
+        sse[i] = "H"
+        if (
+            d3i[i+1] >= _d3_helix[0] and d3i[i+1] <= _d3_helix[1]
+            ) or (
+            ri[i+1] >= _r_helix[0] and ri[i+1] <= _r_helix[1]
+            ):
+              sse[i+1] = "H"
+      i += 1
+
+    # Annotate sheets
+    # Find CA that meet criteria for potential strands
+    is_pot_strand = np.zeros(len(sse), dtype=bool)
+    for i in range(len(sse)):
+      if (    d2i[i] >= _d2_strand[0] and d2i[i] <= _d2_strand[1]
+          and d3i[i] >= _d3_strand[0] and d3i[i] <= _d3_strand[1]
+          and d4i[i] >= _d4_strand[0] and d4i[i] <= _d4_strand[1]
           ) or (
-          ri[i+1] >= _r_helix[0] and ri[i+1] <= _r_helix[1]
+            ri[i] >= _r_strand[0] and ri[i] <= _r_strand[1]
+          and (   (ai[i] >= _a_strand[0] and ai[i] <= _a_strand[1])
+                or (ai[i] >= _a_strand[2] and ai[i] <= _a_strand[3]))
           ):
-            sse[i+1] = "H"
-    i += 1
-  
-  # Annotate sheets
-  # Find CA that meet criteria for potential strands
-  is_pot_strand = np.zeros(len(sse), dtype=bool)
-  for i in range(len(sse)):
-    if (    d2i[i] >= _d2_strand[0] and d2i[i] <= _d2_strand[1]
-        and d3i[i] >= _d3_strand[0] and d3i[i] <= _d3_strand[1]
-        and d4i[i] >= _d4_strand[0] and d4i[i] <= _d4_strand[1]
-        ) or (
-          ri[i] >= _r_strand[0] and ri[i] <= _r_strand[1]
-        and (   (ai[i] >= _a_strand[0] and ai[i] <= _a_strand[1])
-              or (ai[i] >= _a_strand[2] and ai[i] <= _a_strand[3]))
-        ):
-          is_pot_strand[i] = True
-  # Real strands are 5 consecutive strand elements,
-  # or shorter fragments of at least 3 consecutive strand residues,
-  # if they are in hydrogen bond proximity to 5 other residues
-  pot_strand_coord = ca_coord[is_pot_strand]
-  is_strand = np.zeros(len(sse), dtype=bool)
-  counter = 0
-  contacts = 0
-  for i in range(len(sse)):
-    if is_pot_strand[i]:
-      counter += 1
-      coord = ca_coord[i]
-      for strand_coord in ca_coord:
-        dist = distance(coord, strand_coord)
-        if dist >= 4.2 and dist <= 5.2:
-          contacts += 1
-    else:
-      if counter >= 4:
-        is_strand[i-counter : i] = True
-      elif counter == 3 and contacts >= 5:
-        is_strand[i-counter : i] = True
-      counter = 0
-      contacts = 0
-  # Extend the strands by one at each end if CA meets extension criteria
-  i = 0
-  while i < len(sse):
-    if is_strand[i]:
-      sse[i] = "E"
-      if d3i[i-1] >= _d3_strand[0] and d3i[i-1] <= _d3_strand[1]:
-        sse[i-1] = "E"
-      sse[i] = "E"
-      if d3i[i+1] >= _d3_strand[0] and d3i[i+1] <= _d3_strand[1]:
-        sse[i+1] = "E"
-    i += 1
-  return sse
+            is_pot_strand[i] = True
+    # Real strands are 5 consecutive strand elements,
+    # or shorter fragments of at least 3 consecutive strand residues,
+    # if they are in hydrogen bond proximity to 5 other residues
+    pot_strand_coord = ca_coord[is_pot_strand]
+    is_strand = np.zeros(len(sse), dtype=bool)
+    counter = 0
+    contacts = 0
+    for i in range(len(sse)):
+      if is_pot_strand[i]:
+        counter += 1
+        coord = ca_coord[i]
+        for strand_coord in ca_coord:
+          dist = distance(coord, strand_coord)
+          if dist >= 4.2 and dist <= 5.2:
+            contacts += 1
+      else:
+        if counter >= 4:
+          is_strand[i-counter : i] = True
+        elif counter == 3 and contacts >= 5:
+          is_strand[i-counter : i] = True
+        counter = 0
+        contacts = 0
+    # Extend the strands by one at each end if CA meets extension criteria
+    i = 0
+    while i < len(sse):
+      if is_strand[i]:
+        sse[i] = "E"
+        if d3i[i-1] >= _d3_strand[0] and d3i[i-1] <= _d3_strand[1]:
+          sse[i-1] = "E"
+        sse[i] = "E"
+        if d3i[i+1] >= _d3_strand[0] and d3i[i+1] <= _d3_strand[1]:
+          sse[i+1] = "E"
+      i += 1
+    return sse
 
 if __name__ == "__main__":
     main()

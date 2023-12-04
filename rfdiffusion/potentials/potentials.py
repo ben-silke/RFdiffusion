@@ -244,16 +244,18 @@ class olig_contacts(Potential):
             weight (int/float, optional): Scaling/weighting factor
         """
         self.contact_matrix = contact_matrix
-        self.weight_intra = weight_intra 
-        self.weight_inter = weight_inter 
+        self.weight_intra = weight_intra
+        self.weight_inter = weight_inter
         self.r_0 = r_0
         self.d_0 = d_0
 
-        # check contact matrix only contains valid entries 
-        assert all([i in [-1,0,1] for i in contact_matrix.flatten()]), 'Contact matrix must contain only 0, 1, or -1 in entries'
+        # check contact matrix only contains valid entries
+        assert all(
+            i in [-1, 0, 1] for i in contact_matrix.flatten()
+        ), 'Contact matrix must contain only 0, 1, or -1 in entries'
         # assert the matrix is square and symmetric 
-        shape = contact_matrix.shape 
-        assert len(shape) == 2 
+        shape = contact_matrix.shape
+        assert len(shape) == 2
         assert shape[0] == shape[1]
         for i in range(shape[0]):
             for j in range(shape[1]):
@@ -356,15 +358,16 @@ class substrate_contacts(Potential):
         self.weight    = weight
         self.d_0       = d_0
         self.eps       = eps
-        
+
         # motif frame coordinates
         # NOTE: these probably need to be set after sample_init() call, because the motif sequence position in design must be known
         self.motif_frame = None # [4,3] xyz coordinates from 4 atoms of input motif
         self.motif_mapping = None # list of tuples giving positions of above atoms in design [(resi, atom_idx)]
         self.motif_substrate_atoms = None # xyz coordinates of substrate from input motif
         r_min = 2
-        self.energies = []
-        self.energies.append(lambda dgram: s * contact_energy(torch.min(dgram, dim=-1)[0], d_0, r_0))
+        self.energies = [
+            lambda dgram: s * contact_energy(torch.min(dgram, dim=-1)[0], d_0, r_0)
+        ]
         if rep_r_min:
             self.energies.append(lambda dgram: poly_repulse(torch.min(dgram, dim=-1)[0], rep_r_0, rep_s, p=1.5))
         else:
@@ -376,7 +379,7 @@ class substrate_contacts(Potential):
         # First, get random set of atoms
         # This operates on self.xyz_motif, which is assigned to this class in the model runner (for horrible plumbing reasons)
         self._grab_motif_residues(self.xyz_motif)
-        
+
         # for checking affine transformation is corect
         first_distance = torch.sqrt(torch.sqrt(torch.sum(torch.square(self.motif_substrate_atoms[0] - self.motif_frame[0]), dim=-1))) 
 
@@ -389,7 +392,7 @@ class substrate_contacts(Potential):
         # apply affine transformation to substrate atoms
         substrate_atoms = torch.mm(A, self.motif_substrate_atoms.transpose(0,1)).transpose(0,1) + t
         second_distance = torch.sqrt(torch.sqrt(torch.sum(torch.square(new_frame[0] - substrate_atoms[0]), dim=-1)))
-        assert abs(first_distance - second_distance) < 0.01, "Alignment seems to be bad" 
+        assert abs(first_distance - second_distance) < 0.01, "Alignment seems to be bad"
         diffusion_mask = mask_expand(self.diffusion_mask, 1)
         Ca = xyz[~diffusion_mask, 1]
 
@@ -397,13 +400,10 @@ class substrate_contacts(Potential):
         dgram = torch.cdist(Ca[None,...].contiguous(), substrate_atoms.float()[None], p=2)[0] # [Lb,Lb]
 
         all_energies = []
-        for i, energy_fn in enumerate(self.energies):
+        for energy_fn in self.energies:
             energy = energy_fn(dgram)
             all_energies.append(energy.sum())
         return - self.weight * sum(all_energies)
-
-        #Potential value is the average of both radii of gyration (is avg. the best way to do this?)
-        return self.weight * ncontacts.sum()
 
     def _recover_affine(self,frame1, frame2):
         """

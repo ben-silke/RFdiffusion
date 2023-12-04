@@ -38,13 +38,12 @@ class ContigMap:
                 )
 
         self.chain_order = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        if length is not None:
-            if "-" not in length:
-                self.length = [int(length), int(length) + 1]
-            else:
-                self.length = [int(length.split("-")[0]), int(length.split("-")[1]) + 1]
-        else:
+        if length is None:
             self.length = None
+        elif "-" not in length:
+            self.length = [int(length), int(length) + 1]
+        else:
+            self.length = [int(length.split("-")[0]), int(length.split("-")[1]) + 1]
         self.ref_idx = ref_idx
         self.hal_idx = hal_idx
         self.idx_rf = idx_rf
@@ -83,15 +82,13 @@ class ContigMap:
             self.ref = ref_idx
             self.hal = hal_idx
             self.rf = idx_rf
-        self.mask_1d = [False if i == ("_", "_") else True for i in self.ref]
+        self.mask_1d = [i != ("_", "_") for i in self.ref]
         # take care of sequence and structure masking
         if self.inpaint_seq_tensor is None:
             if self.inpaint_seq is not None:
                 self.inpaint_seq = self.get_inpaint_seq_str(self.inpaint_seq)
             else:
-                self.inpaint_seq = np.array(
-                    [True if i != ("_", "_") else False for i in self.ref]
-                )
+                self.inpaint_seq = np.array([i != ("_", "_") for i in self.ref])
         else:
             self.inpaint_seq = self.inpaint_seq_tensor
 
@@ -99,9 +96,7 @@ class ContigMap:
             if self.inpaint_str is not None:
                 self.inpaint_str = self.get_inpaint_seq_str(self.inpaint_str)
             else:
-                self.inpaint_str = np.array(
-                    [True if i != ("_", "_") else False for i in self.ref]
-                )
+                self.inpaint_str = np.array([i != ("_", "_") for i in self.ref])
         else:
             self.inpaint_str = self.inpaint_str_tensor
         # get 0-indexed input/output (for trb file)
@@ -131,19 +126,20 @@ class ContigMap:
         """
         length_compatible = False
         count = 0
-        while length_compatible is False:
+        while not length_compatible:
             inpaint_chains = 0
             contig_list = self.contigs[0].strip().split()
             sampled_mask = []
             sampled_mask_length = 0
             # allow receptor chain to be last in contig string
-            if all([i[0].isalpha() for i in contig_list[-1].split("/")]):
+            if all(i[0].isalpha() for i in contig_list[-1].split("/")):
                 contig_list[-1] = f"{contig_list[-1]}/0"
             for con in contig_list:
                 if (
-                    all([i[0].isalpha() for i in con.split("/")[:-1]])
+                    all(i[0].isalpha() for i in con.split("/")[:-1])
                     and con.split("/")[-1] == "0"
-                ) or self.topo is True:
+                    or self.topo is True
+                ):
                     # receptor chain
                     sampled_mask.append(con)
                 else:
@@ -154,37 +150,35 @@ class ContigMap:
                     for subcon in subcons:
                         if subcon[0].isalpha():
                             subcon_out.append(subcon)
-                            if "-" in subcon:
-                                sampled_mask_length += (
+                            sampled_mask_length += (
+                                (
                                     int(subcon.split("-")[1])
                                     - int(subcon.split("-")[0][1:])
                                     + 1
                                 )
-                            else:
-                                sampled_mask_length += 1
-
+                                if "-" in subcon
+                                else 1
+                            )
+                        elif "-" in subcon:
+                            length_inpaint = random.randint(
+                                int(subcon.split("-")[0]), int(subcon.split("-")[1])
+                            )
+                            subcon_out.append(f"{length_inpaint}-{length_inpaint}")
+                            sampled_mask_length += length_inpaint
+                        elif subcon == "0":
+                            subcon_out.append("0")
                         else:
-                            if "-" in subcon:
-                                length_inpaint = random.randint(
-                                    int(subcon.split("-")[0]), int(subcon.split("-")[1])
-                                )
-                                subcon_out.append(f"{length_inpaint}-{length_inpaint}")
-                                sampled_mask_length += length_inpaint
-                            elif subcon == "0":
-                                subcon_out.append("0")
-                            else:
-                                length_inpaint = int(subcon)
-                                subcon_out.append(f"{length_inpaint}-{length_inpaint}")
-                                sampled_mask_length += int(subcon)
+                            length_inpaint = int(subcon)
+                            subcon_out.append(f"{length_inpaint}-{length_inpaint}")
+                            sampled_mask_length += int(subcon)
                     sampled_mask.append("/".join(subcon_out))
             # check length is compatible
-            if self.length is not None:
-                if (
+            if self.length is None:
+                length_compatible = True
+            elif (
                     sampled_mask_length >= self.length[0]
                     and sampled_mask_length < self.length[1]
                 ):
-                    length_compatible = True
-            else:
                 length_compatible = True
             count += 1
             if count == 100000:  # contig string incompatible with this length
@@ -204,13 +198,14 @@ class ContigMap:
         inpaint_chain_break = []
         for con in self.sampled_mask:
             if (
-                all([i[0].isalpha() for i in con.split("/")[:-1]])
+                all(i[0].isalpha() for i in con.split("/")[:-1])
                 and con.split("/")[-1] == "0"
-            ) or self.topo is True:
+                or self.topo is True
+            ):
                 # receptor chain
                 subcons = con.split("/")[:-1]
                 assert all(
-                    [i[0] == subcons[0][0] for i in subcons]
+                    i[0] == subcons[0][0] for i in subcons
                 ), "If specifying fragmented receptor in a single block of the contig string, they MUST derive from the same chain"
                 assert all(
                     int(subcons[i].split("-")[0][1:])
@@ -282,7 +277,7 @@ class ContigMap:
                         inpaint_idx += int(subcon.split("-")[0])
                 inpaint_chain_break.append((inpaint_idx - 1, 200))
 
-        if self.topo is True or inpaint_hal == []:
+        if self.topo is True or not inpaint_hal:
             receptor_hal = [(i[0], i[1]) for i in receptor_hal]
         else:
             receptor_hal = [
@@ -361,14 +356,15 @@ class ContigMap:
         )
 
     def get_mappings(self):
-        mappings = {}
-        mappings["con_ref_pdb_idx"] = [i for i in self.inpaint if i != ("_", "_")]
-        mappings["con_hal_pdb_idx"] = [
-            self.inpaint_hal[i]
-            for i in range(len(self.inpaint_hal))
-            if self.inpaint[i] != ("_", "_")
-        ]
-        mappings["con_ref_idx0"] = np.array(self.ref_idx0_inpaint)
+        mappings = {
+            "con_ref_pdb_idx": [i for i in self.inpaint if i != ("_", "_")],
+            "con_hal_pdb_idx": [
+                self.inpaint_hal[i]
+                for i in range(len(self.inpaint_hal))
+                if self.inpaint[i] != ("_", "_")
+            ],
+            "con_ref_idx0": np.array(self.ref_idx0_inpaint),
+        }
         mappings["con_hal_idx0"] = np.array(self.hal_idx0_inpaint)
         if self.inpaint != self.ref:
             mappings["complex_con_ref_pdb_idx"] = [

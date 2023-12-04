@@ -77,8 +77,9 @@ class NT:  # named tuple
         r = 'NT: |'
         for i in dir(self):
             print(i)
-            if not i.startswith('__') and i != '_as_dict' and not isinstance(getattr(self, i), types_module.MethodType): r += '%s --> %s, ' % (i, getattr(self, i))
-        return r[:-2]+'|'
+            if not i.startswith('__') and i != '_as_dict' and not isinstance(getattr(self, i), types_module.MethodType):
+                r += f'{i} --> {getattr(self, i)}, '
+        return f'{r[:-2]}|'
 
     @property
     def _as_dict(self):
@@ -173,19 +174,18 @@ def execute_through_pexpect(command_line):
 def execute_through_pty(command_line):
     import pty, select
 
+    buffer = []
     if sys.platform == "darwin":
 
         master, slave = pty.openpty()
         p = subprocess.Popen(command_line, shell=True, stdout=slave, stdin=slave,
                              stderr=subprocess.STDOUT, close_fds=True)
 
-        buffer = []
         while True:
             try:
                 if select.select([master], [], [], 0.2)[0]:  # has something to read
-                    data = os.read(master, 1 << 22)
-                    if data: buffer.append(data)
-
+                    if data := os.read(master, 1 << 22):
+                        buffer.append(data)
                 elif (p.poll() is not None)  and  (not select.select([master], [], [], 0.2)[0] ): break  # process is finished and output buffer if fully read
 
             except OSError: break  # OSError will be raised when child process close PTY descriptior
@@ -194,9 +194,6 @@ def execute_through_pty(command_line):
 
         os.close(master)
         os.close(slave)
-
-        p.wait()
-        exit_code = p.returncode
 
         '''
         buffer = []
@@ -229,19 +226,18 @@ def execute_through_pty(command_line):
 
         os.close(slave)
 
-        buffer = []
         while True:
             try:
-                data = os.read(master, 1 << 22)
-                if data: buffer.append(data)
+                if data := os.read(master, 1 << 22):
+                    buffer.append(data)
             except OSError: break  # OSError will be raised when child process close PTY descriptior
 
         output = b''.join(buffer).decode(encoding='utf-8', errors='backslashreplace')
 
         os.close(master)
 
-        p.wait()
-        exit_code = p.returncode
+    p.wait()
+    exit_code = p.returncode
 
     return exit_code, output
 
@@ -255,29 +251,32 @@ def execute(message, command_line, return_='status', until_successes=False, term
         #exit_code, output = execute_through_pexpect(command_line)
         exit_code, output = execute_through_pty(command_line)
 
-        if (exit_code  and  not silence_output_on_errors) or  not (silent or silence_output): print(output); sys.stdout.flush();
+        if (
+            (exit_code and not silence_output_on_errors)
+            or not silent
+            and not silence_output
+        ): print(output); sys.stdout.flush();
 
-        if exit_code and until_successes: pass  # Thats right - redability COUNT!
-        else: break
+        if not exit_code or not until_successes:
+            break
 
-        print( "Error while executing {}: {}\n".format(message, output) )
+        print(f"Error while executing {message}: {output}\n")
         print("Sleeping 60s... then I will retry...")
         sys.stdout.flush();
         time.sleep(60)
 
     if add_message_and_command_line_to_output: output = message + '\nCommand line: ' + command_line + '\n' + output
 
-    if return_ == 'tuple'  or  return_ == tuple: return(exit_code, output)
+    if return_ in ['tuple', tuple]: return(exit_code, output)
 
     if exit_code and terminate_on_failure:
         print("\nEncounter error while executing: " + command_line)
-        if return_==True: return True
-        else:
-            print('\nEncounter error while executing: ' + command_line + '\n' + output);
-            raise BenchmarkError('\nEncounter error while executing: ' + command_line + '\n' + output)
+        if return_==True:
+            if return_==True: return True
+        print('\nEncounter error while executing: ' + command_line + '\n' + output);
+        raise BenchmarkError('\nEncounter error while executing: ' + command_line + '\n' + output)
 
-    if return_ == 'output': return output
-    else: return exit_code
+    return output if return_ == 'output' else exit_code
 
 
 def parallel_execute(name, jobs, rosetta_dir, working_dir, cpu_count, time=16):
@@ -304,17 +303,20 @@ def parallel_execute(name, jobs, rosetta_dir, working_dir, cpu_count, time=16):
             ...
         }
     '''
-    job_file_name = working_dir + '/' + name
-    with open(job_file_name + '.json', 'w') as f: json.dump(jobs, f, sort_keys=True, indent=2) # JSON handles unicode internally
+    job_file_name = f'{working_dir}/{name}'
+    with open(f'{job_file_name}.json', 'w') as f: json.dump(jobs, f, sort_keys=True, indent=2) # JSON handles unicode internally
     if time is not None:
         allowed_time = int(time*60)
         ulimit_command = f'ulimit -t {allowed_time} && '
     else:
         ulimit_command = ''
-    command = f'cd {working_dir} && ' + ulimit_command + f'{rosetta_dir}/tests/benchmark/util/parallel.py -j{cpu_count} {job_file_name}.json'
-    execute("Running {} in parallel with {} CPU's...".format(name, cpu_count), command )
+    command = (
+        f'cd {working_dir} && {ulimit_command}'
+        + f'{rosetta_dir}/tests/benchmark/util/parallel.py -j{cpu_count} {job_file_name}.json'
+    )
+    execute(f"Running {name} in parallel with {cpu_count} CPU's...", command)
 
-    with open(job_file_name+'.results.json') as f: return json.load(f)
+    with open(f'{job_file_name}.results.json') as f: return json.load(f)
 
 
 def calculate_unique_prefix_path(platform, config):
@@ -336,7 +338,7 @@ def get_python_include_and_lib(python):
     info = execute('Getting python configuration info...', f'unset __PYVENV_LAUNCHER__ && cd {python_bin_dir} && PATH=.:$PATH && {python_config} --prefix --includes', return_='output').replace('\r', '').split('\n')  # Python-3 only: --abiflags
     python_prefix = info[0]
     python_include_dir = info[1].split()[0][len('-I'):]
-    python_lib_dir = python_prefix + '/lib'
+    python_lib_dir = f'{python_prefix}/lib'
     #python_abi_suffix = info[2]
     #print(python_include_dir, python_lib_dir)
 
@@ -352,7 +354,7 @@ def local_open_ssl_install(prefix, build_prefix, jobs):
     #url = 'https://www.openssl.org/source/openssl-3.0.0.tar.gz'
 
 
-    archive = build_prefix + '/' + url.split('/')[-1]
+    archive = f'{build_prefix}/' + url.split('/')[-1]
     build_dir = archive.rpartition('.tar.gz')[0]
     if os.path.isdir(build_dir): shutil.rmtree(build_dir)
 
@@ -360,7 +362,10 @@ def local_open_ssl_install(prefix, build_prefix, jobs):
         response = urllib.request.urlopen(url)
         f.write( response.read() )
 
-    execute('Unpacking {}'.format(archive), 'cd {build_prefix} && tar -xvzf {archive}'.format(**vars()) )
+    execute(
+        f'Unpacking {archive}',
+        'cd {build_prefix} && tar -xvzf {archive}'.format(**vars()),
+    )
 
     execute('Configuring...', f'cd {build_dir} && ./config --prefix={prefix}')
     execute('Building...',    f'cd {build_dir} && make -j{jobs}')
@@ -372,9 +377,10 @@ def local_open_ssl_install(prefix, build_prefix, jobs):
 def remove_pip_and_easy_install(prefix_root_path):
     ''' remove `pip` and `easy_install` executable from given Python / virtual-environments install
     '''
-    for f in os.listdir(prefix_root_path + '/bin'):  # removing all pip's and easy_install's to make sure that environment is immutable
+    for f in os.listdir(f'{prefix_root_path}/bin'):  # removing all pip's and easy_install's to make sure that environment is immutable
         for p in ['pip', 'easy_install']:
-            if f.startswith(p): os.remove(prefix_root_path + '/bin/' + f)
+            if f.startswith(p):
+                os.remove(f'{prefix_root_path}/bin/{f}')
 
 
 
@@ -425,10 +431,12 @@ def local_python_install(platform, config):
 
     # map of env -> ('shell-code-before ./configure', 'extra-arguments-for-configure')
     extras = {
-        #('mac',) :          ('__PYVENV_LAUNCHER__="" MACOSX_DEPLOYMENT_TARGET={}'.format(platform_module.mac_ver()[0]), ''),  # __PYVENV_LAUNCHER__ now used by-default for all platform installs
-        ('mac',) :          ('MACOSX_DEPLOYMENT_TARGET={}'.format(platform_module.mac_ver()[0]), ''),
-        ('linux',  '2.7') : ('', '--enable-unicode=ucs4'),
-        ('ubuntu', '2.7') : ('', '--enable-unicode=ucs4'),
+        ('mac',): (
+            f'MACOSX_DEPLOYMENT_TARGET={platform_module.mac_ver()[0]}',
+            '',
+        ),
+        ('linux', '2.7'): ('', '--enable-unicode=ucs4'),
+        ('ubuntu', '2.7'): ('', '--enable-unicode=ucs4'),
     }
 
     #packages = '' if (python_version[0] == '2' or  python_version == '3.5' ) and  platform['os'] == 'mac' else 'pip setuptools wheel' # 2.7 is now deprecated on Mac so some packages could not be installed
@@ -439,19 +447,21 @@ def local_python_install(platform, config):
     extra = extras.get( (platform['os'],)  , ('', '') )
     extra = extras.get( (platform['os'], python_version) , extra)
 
-    extra = ('unset __PYVENV_LAUNCHER__ && ' + extra[0], extra[1])
+    extra = f'unset __PYVENV_LAUNCHER__ && {extra[0]}', extra[1]
 
     options = '--with-ensurepip' #'--without-ensurepip'
     signature = f'v1.5.1 url: {url}\noptions: {options}\ncompiler: {compiler}\nextra: {extra}\npackages: {packages}\n'
 
-    h = hashlib.md5(); h.update( signature.encode('utf-8', errors='backslashreplace') ); hash = h.hexdigest()
+    h = hashlib.md5()
+    h.update( signature.encode('utf-8', errors='backslashreplace') )
+    hash = h.hexdigest()
 
-    root = calculate_unique_prefix_path(platform, config) + '/python-' + python_version + '.' +  compiler + '/' + hash
+    root = f'{calculate_unique_prefix_path(platform, config)}/python-{python_version}.{compiler}/{hash}'
 
-    signature_file_name = root + '/.signature'
+    signature_file_name = f'{root}/.signature'
 
     #activate   = root + '/bin/activate'
-    executable = root + '/bin/python' + python_version
+    executable = f'{root}/bin/python{python_version}'
 
     # if os.path.isfile(executable)  and  (not execute('Getting python configuration info...', '{executable}-config --prefix --includes'.format(**vars()), terminate_on_failure=False) ):
     #     print('found executable!')
@@ -461,21 +471,20 @@ def local_python_install(platform, config):
     # print('executable_version: {}'.format(executable_version))
     #if executable_version != url.rpartition('Python-')[2][:-len('.tgz')]:
 
-    if os.path.isfile(signature_file_name) and open(signature_file_name).read() == signature:
-        #print('Install for Python-{} is detected, skipping installation procedure...'.format(python_version))
-        pass
-
-    else:
+    if (
+        not os.path.isfile(signature_file_name)
+        or open(signature_file_name).read() != signature
+    ):
         print( 'Installing Python-{python_version}, using {url} with extra:{extra}...'.format( **vars() ) )
 
         if os.path.isdir(root): shutil.rmtree(root)
 
-        build_prefix = os.path.abspath(root + '/../build-python-{}'.format(python_version) )
+        build_prefix = os.path.abspath(f'{root}/../build-python-{python_version}')
 
         if not os.path.isdir(root): os.makedirs(root)
         if not os.path.isdir(build_prefix): os.makedirs(build_prefix)
 
-        platform_is_mac = True if platform['os'] in ['mac', 'm1'] else False
+        platform_is_mac = platform['os'] in ['mac', 'm1']
         platform_is_linux = not platform_is_mac
 
         #if False and platform['os'] == 'mac' and platform_module.machine() == 'arm64' and tuple( map(int, python_version.split('.') ) ) >= (3, 9):
@@ -485,7 +494,7 @@ def local_python_install(platform, config):
             options += f' --with-openssl={root} --with-openssl-rpath=auto'
             #signature += 'OpenSSL install: ' + open_ssl_url + '\n'
 
-        archive = build_prefix + '/' + url.split('/')[-1]
+        archive = f'{build_prefix}/' + url.split('/')[-1]
         build_dir = archive.rpartition('.tgz')[0]
         if os.path.isdir(build_dir): shutil.rmtree(build_dir)
 
@@ -496,7 +505,10 @@ def local_python_install(platform, config):
 
         #execute('Execution environment:', 'env'.format(**vars()) )
 
-        execute('Unpacking {}'.format(archive), 'cd {build_prefix} && tar -xvzf {archive}'.format(**vars()) )
+        execute(
+            f'Unpacking {archive}',
+            'cd {build_prefix} && tar -xvzf {archive}'.format(**vars()),
+        )
 
         #execute('Building and installing...', 'cd {} && CC={compiler} CXX={cpp_compiler} {extra[0]} ./configure {extra[1]} --prefix={root} && {extra[0]} make -j{jobs} && {extra[0]} make install'.format(build_dir, **locals()) )
         execute('Configuring...', 'cd {} && CC={compiler} CXX={cpp_compiler} {extra[0]} ./configure {options} {extra[1]} --prefix={root}'.format(build_dir, **locals()) )
@@ -545,12 +557,20 @@ def setup_python_virtual_environment(working_dir, python_environment, packages='
 
     activate = f'unset __PYVENV_LAUNCHER__ && . {working_dir}/bin/activate'
 
-    bin=working_dir+'/bin'
+    bin = f'{working_dir}/bin'
 
-    if packages: execute('Installing packages: {}...'.format(packages), 'unset __PYVENV_LAUNCHER__ && {bin}/python {bin}/pip install --upgrade pip setuptools && {bin}/python {bin}/pip install --progress-bar off {packages}'.format(**vars()) )
+    if packages:
+        execute(
+            f'Installing packages: {packages}...',
+            'unset __PYVENV_LAUNCHER__ && {bin}/python {bin}/pip install --upgrade pip setuptools && {bin}/python {bin}/pip install --progress-bar off {packages}'.format(
+                **vars()
+            ),
+        )
     #if packages: execute('Installing packages: {}...'.format(packages), '{bin}/pip{python_environment.version} install {packages}'.format(**vars()) )
 
-    return NT(activate = activate, python = bin + '/python', root = working_dir, bin = bin)
+    return NT(
+        activate=activate, python=f'{bin}/python', root=working_dir, bin=bin
+    )
 
 
 
@@ -559,8 +579,15 @@ def setup_persistent_python_virtual_environment(python_environment, packages):
     '''
 
     if python_environment.version.startswith('2.'):
-        assert not packages, f'ERROR: setup_persistent_python_virtual_environment does not support Python-2.* with non-empty package list!'
-        return NT(activate = ':', python = python_environment.python, root = python_environment.root, bin = python_environment.root + '/bin')
+        assert (
+            not packages
+        ), 'ERROR: setup_persistent_python_virtual_environment does not support Python-2.* with non-empty package list!'
+        return NT(
+            activate=':',
+            python=python_environment.python,
+            root=python_environment.root,
+            bin=f'{python_environment.root}/bin',
+        )
 
     else:
         #if 'certifi' not in packages: packages += ' certifi'
@@ -571,21 +598,31 @@ def setup_persistent_python_virtual_environment(python_environment, packages):
 
         prefix = calculate_unique_prefix_path(python_environment.platform, python_environment.config)
 
-        root = os.path.abspath( prefix + '/python_virtual_environments/' + '/python-' + python_environment.version + '/' + hash )
-        signature_file_name = root + '/.signature'
+        root = os.path.abspath(
+            f'{prefix}/python_virtual_environments//python-{python_environment.version}/{hash}'
+        )
+        signature_file_name = f'{root}/.signature'
         signature = f'setup_persistent_python_virtual_environment v1.0.0\npython: {python_environment.hash}\npackages: {packages}\n'
 
         activate = f'unset __PYVENV_LAUNCHER__ && . {root}/bin/activate'
         bin = f'{root}/bin'
 
-        if os.path.isfile(signature_file_name) and open(signature_file_name).read() == signature: pass
-        else:
+        if (
+            not os.path.isfile(signature_file_name)
+            or open(signature_file_name).read() != signature
+        ):
             if os.path.isdir(root): shutil.rmtree(root)
             setup_python_virtual_environment(root, python_environment, packages=packages)
             remove_pip_and_easy_install(root)  # removing all pip's and easy_install's to make sure that environment is immutable
             with open(signature_file_name, 'w') as f: f.write(signature)
 
-        return NT(activate = activate, python = bin + '/python', root = root, bin = bin, hash = hash)
+        return NT(
+            activate=activate,
+            python=f'{bin}/python',
+            root=root,
+            bin=bin,
+            hash=hash,
+        )
 
 
 
@@ -625,31 +662,31 @@ def _get_path_to_conda_root(platform, config):
 
     signature = f'url: {url}\nversion: {version}\channels: {channels}\npackages: {packages}\n'
 
-    root = calculate_unique_prefix_path(platform, config) + '/conda'
+    root = f'{calculate_unique_prefix_path(platform, config)}/conda'
 
-    signature_file_name = root + '/.signature'
+    signature_file_name = f'{root}/.signature'
 
     # presense of __PYVENV_LAUNCHER__,PYTHONHOME, PYTHONPATH sometimes confuse Python so we have to unset them
     unset = 'unset __PYVENV_LAUNCHER__ && unset PYTHONHOME && unset PYTHONPATH'
-    activate = unset + ' && . ' + root + '/bin/activate'
+    activate = f'{unset} && . {root}/bin/activate'
 
-    executable = root + '/bin/conda'
+    executable = f'{root}/bin/conda'
 
 
     if os.path.isfile(signature_file_name) and open(signature_file_name).read() == signature:
-        print( f'Install for MiniConda is detected, skipping installation procedure...' )
+        print('Install for MiniConda is detected, skipping installation procedure...')
 
     else:
         print( f'Installing MiniConda, using {url}...' )
 
         if os.path.isdir(root): shutil.rmtree(root)
 
-        build_prefix = os.path.abspath(root + f'/../build-conda' )
+        build_prefix = os.path.abspath(f'{root}/../build-conda')
 
         #if not os.path.isdir(root): os.makedirs(root)
         if not os.path.isdir(build_prefix): os.makedirs(build_prefix)
 
-        archive = build_prefix + '/' + url.split('/')[-1]
+        archive = f'{build_prefix}/' + url.split('/')[-1]
 
         with open(archive, 'wb') as f:
             response = urllib.request.urlopen(url)
@@ -669,7 +706,7 @@ def _get_path_to_conda_root(platform, config):
 
         print( f'Installing MiniConda, using {url}... Done.' )
 
-    execute(f'Updating conda base...', f'{activate} && conda update --all --yes' )
+    execute('Updating conda base...', f'{activate} && conda update --all --yes')
     return NT(conda=executable, root=root, activate=activate, url=url)
 
 
@@ -682,7 +719,7 @@ def setup_conda_virtual_environment(working_dir, platform, config, packages=''):
 
     python_version = platform.get('python', DEFAULT_PYTHON_VERSION)
 
-    prefix = os.path.abspath( working_dir + '/.conda-python-' + python_version )
+    prefix = os.path.abspath(f'{working_dir}/.conda-python-{python_version}')
 
     command_line = f'conda create --quiet --yes --prefix {prefix} python={python_version}'
 
@@ -692,7 +729,7 @@ def setup_conda_virtual_environment(working_dir, platform, config, packages=''):
 
     if packages: execute( f'Setting up extra packages {packages}...', f'cd {working_dir} && {activate} && conda install --quiet --yes {packages}' )
 
-    python = prefix + '/bin/python' + python_version
+    python = f'{prefix}/bin/python{python_version}'
 
     il = get_python_include_and_lib(python)
 

@@ -17,14 +17,13 @@ one_letter = ["A", "R", "N", "D", "C", \
 
 aa2num= {x:i for i,x in enumerate(num2aa)}
 
-aa_321 = {a:b for a,b in zip(num2aa,one_letter)}
+aa_321 = dict(zip(num2aa,one_letter))
 aa_123 = {val:key for key,val in aa_321.items()}
 
 
 # create single letter code string from parsed integer sequence
 def seq2chars(seq):
-    out = ''.join([aa_321[num2aa[a]] for a in seq])
-    return out
+    return ''.join([aa_321[num2aa[a]] for a in seq])
 
 # full sc atom representation (Nx14)
 aa2long=[

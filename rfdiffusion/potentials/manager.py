@@ -13,17 +13,14 @@ def make_contact_matrix(nchain, intra_all=False, inter_all=False, contact_string
         contact_str (str, optional): String denoting how to define contacts, comma delimited between pairs of chains
             '!' denotes repulsive, '&' denotes attractive
     """
-    alphabet   = [a for a in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ']
-    letter2num = {a:i for i,a in enumerate(alphabet)}
-    
     contacts   = np.zeros((nchain,nchain))
     written    = np.zeros((nchain,nchain))
-    
-    
+
+
     # intra_all - everything on the diagonal has contact potential
     if intra_all:
         contacts[np.arange(nchain),np.arange(nchain)] = 1
-    
+
     # inter all - everything off the diagonal has contact potential
     if inter_all:
         mask2d = np.full_like(contacts,False)
@@ -31,13 +28,16 @@ def make_contact_matrix(nchain, intra_all=False, inter_all=False, contact_string
             for j in range(len(contacts)):
                 if i!=j:
                     mask2d[i,j] = True
-        
+
         contacts[mask2d.astype(bool)] = 1
 
 
-    # custom contacts/repulsions from user 
+    # custom contacts/repulsions from user
     if contact_string != None:
-        contact_list = contact_string.split(',') 
+        contact_list = contact_string.split(',')
+        alphabet = list('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+        letter2num = {a:i for i,a in enumerate(alphabet)}
+
         for c in contact_list:
             assert len(c) == 3
             i,j = letter2num[c[0]],letter2num[c[2]]
@@ -51,7 +51,7 @@ def make_contact_matrix(nchain, intra_all=False, inter_all=False, contact_string
             else:
                 contacts[i,j] = 1
                 contacts[j,i] = 1
-            
+
     return contacts 
 
 
@@ -134,7 +134,7 @@ class PotentialManager:
         setting_dict = {entry.split(':')[0]:entry.split(':')[1] for entry in potstr.split(',')}
 
         for key in setting_dict:
-            if not key == 'type': setting_dict[key] = float(setting_dict[key])
+            if key != 'type': setting_dict[key] = float(setting_dict[key])
 
         return setting_dict
 
@@ -160,7 +160,7 @@ class PotentialManager:
                                 'inter_all':self.potentials_config.olig_inter_all,
                                 'contact_string':self.potentials_config.olig_custom_contact }
                 contact_matrix = make_contact_matrix(**contact_kwargs)
-                kwargs.update({'contact_matrix':contact_matrix})
+                kwargs['contact_matrix'] = contact_matrix
 
 
             to_apply.append(potentials.implemented_potentials[potential_dict['type']](**kwargs))
